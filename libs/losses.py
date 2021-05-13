@@ -5,3 +5,37 @@
 
 import numpy as np
 import torch 
+
+from enum import IntEnum
+
+def calc_loss_avg_returns(pred_position, return_normalized):
+    return torch.mean(calc_captured_return(pred_position, return_normalized))
+
+def calc_loss_sharpe(pred_position, return_normalized):
+    return 1
+
+def calc_captured_return(pred_position, return_normalized):
+    return pred_position * return_normalized
+
+
+class LossTypes(IntEnum):
+    AVG_RETURNS = 1
+    SHARPE = 2
+
+class LossHelper:
+
+    @staticmethod
+    def get_valid_losses():
+        return [LossTypes.AVG_RETURNS, LossTypes.SHARPE]
+
+    @staticmethod
+    def get_name(loss_type):
+        return {LossTypes.AVG_RETURNS: 'avg returns',
+        LossTypes.SHARPE: 'sharpe'}
+
+    @staticmethod
+    def get_loss_function(loss_type):
+        return {
+            LossTypes.AVG_RETURNS: calc_loss_avg_returns,
+            LossTypes.SHARPE: calc_loss_sharpe
+        }[loss_type]

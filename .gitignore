@@ -1,5 +1,10 @@
 /data
+/results
 *.code-workspace
+
+.RData
+.Rhistory
+/R
 
 # --- --- --- --- --- ---
 # --- --- --- --- --- ---
@@ -212,3 +217,4 @@ Thumbs.db
 
 
 # End of https://www.toptal.com/developers/gitignore/api/macos,linux,jupyternotebooks,python
+.Rproj.user
