@@ -2,6 +2,8 @@
 /results
 *.code-workspace
 
+.runs/
+
 .RData
 .Rhistory
 /R

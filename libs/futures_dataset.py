@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 import matplotlib.pyplot as plt
+from datetime import datetime
 
 import libs.utils as utils
 from libs.data_loader import BaseDataLoader, DataTypes
@@ -92,7 +93,8 @@ class FuturesDataset(Dataset):
             time_ids = time_ids[~mask]
 
         # rewrite timestamp id to acutal time stamp
-        time_index = [[time_lookup_i2d[t] for j, t in enumerate(win)] for i, win in enumerate(time_ids.tolist())]
+        #time_index = [[time_lookup_i2d[t].strftime("%Y-%m-%d %H:%M:%S") for j, t in enumerate(win)] for i, win in enumerate(time_ids.tolist())]
+        time_index = torch.tensor(time_ids)
 
         return data, time_index, inst_index
 
@@ -127,16 +129,14 @@ class FuturesDataset(Dataset):
 
     def __getitem__(self, idx):
         if torch.is_tensor(idx):
-            idx = idx.tolist()
-
-        #print(len(self.inst_index_lookup.iloc[idx]))
+            idx = idx.tolist()  
 
         # covariates, target var, instrument label
         return {
             'inp': self.data[idx, :, self.cov_indexes],
             'trg': self.data[idx, :, self.trg_indexes],
             'time': self.time_index[idx],
-            'inst': self.inst_index.iloc[idx].tolist()
+            'inst': self.inst_index.iloc[idx].tolist()[1] # index 0 are the numerical ids
         }
 
     def plot_example(self, id, model=None):
