@@ -1,6 +1,7 @@
 /data
 /results
 *.code-workspace
+*.csv
 
 .runs/
 

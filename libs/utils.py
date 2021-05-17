@@ -5,8 +5,11 @@
 
 import os
 import numpy as np
+from numpy.lib import isin
 import pandas as pd
 import datetime
+from pathlib import Path
+from libs.losses import LossHelper
 
 # includes  '<path>/..'
 ROOT_FOLDER = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
@@ -112,11 +115,16 @@ def calc_strategy_returns(positions, realized_returns, aggregate_by=None):
     else:
         return str_rts
 
-def get_results_path(file_label, model, time_start, time_end):
-    #if isinstance(time_start, datetime.datetime):
-    #    time_start = time_start.strftime("%Y%m%d")
-    #if isinstance(time_end, datetime.datetime):
-    #    time_end = time_end.strftime("%Y%m%d")
-    file_name = f"{file_label}_{model}.csv"
+def get_save_path(file_label, model, time_test, file_type="csv", loss_type=None):
+    if isinstance(time_test, datetime.datetime):
+        time_test = time_test.strftime("%Y-%m-%d")
+    elif isinstance(time_test, str):
+        time_test = time_test.replace('/', '-').replace(':', '-').replace(' ', '-')
+
+    Path(os.path.join(RESULTS_FOLDER, model)).mkdir(parents=True, exist_ok=True)
+    file_name = f"{model}/{file_label}"
+    if loss_type is not None:
+        file_name = file_name + f"_{LossHelper.get_name(loss_type)}"
+    file_name = file_name + f"_{time_test}.{file_type}"
     return os.path.join(RESULTS_FOLDER, file_name)
 

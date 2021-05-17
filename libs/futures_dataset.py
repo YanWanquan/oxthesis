@@ -94,19 +94,23 @@ class FuturesDataset(Dataset):
 
         # rewrite timestamp id to acutal time stamp
         #time_index = [[time_lookup_i2d[t].strftime("%Y-%m-%d %H:%M:%S") for j, t in enumerate(win)] for i, win in enumerate(time_ids.tolist())]
-        time_index = torch.tensor(time_ids)
+        time_index = time_ids
 
         return data, time_index, inst_index
 
-    def normalize_df(self, df, do_scaler='standard'):
-        if do_scaler == 'standard':
+    def normalize_df(self, df, do_scaler=None):
+        if do_scaler is None:
+            print("> No scaling used")
+            return df 
+        elif do_scaler == 'standard':
             scaler = StandardScaler().fit(df[DataTypes.TRAIN])
         elif do_scaler == 'minmax':
             scaler = MinMaxScaler(feature_range=(
-                0, 1)).fit(df[DataTypes.TRAIN])
+                -1, 1)).fit(df[DataTypes.TRAIN])
         else:
             raise ValueError("Either use the standard or min/max scaler!")
 
+        print(f"> Scaling data with {do_scaler} scaler")
         df_norm = {}
         for data_type, x in df.items():
             df_norm[data_type] = pd.DataFrame(scaler.transform(x), index=df[data_type].index, columns=df[data_type].columns)
@@ -139,7 +143,7 @@ class FuturesDataset(Dataset):
             'inst': self.inst_index.iloc[idx].tolist()[1] # index 0 are the numerical ids
         }
 
-    def plot_example(self, id, model=None):
+    def plot_example(self, id, model=None, base_df=None):
         """Plots a sample of the dataset"""
         # tbd: replace x-axis by 'time' (can not just add one day as this will confuse with weekends/bank holidays)
         inp_col = self.cov_indexes.index(self.cov_lookup['rts_scaled'])
@@ -151,7 +155,9 @@ class FuturesDataset(Dataset):
         plt.scatter(range(self.tau, self.win_size+1),
                     self[id]['trg'], label="Targets", marker='.', c='#2ca02c', s=64, edgecolors='k')
         if model is not None:
-            pred = model(self[id]['inp'].unsqueeze(0))
+            with torch.no_grad():
+                pred = model(self[id]['inp'].unsqueeze(0))
+                pred = pred.squeeze().numpy()
             plt.scatter(range(self.tau, self.win_size+1), pred, marker='X', edgecolors='k', label='Predictions',
                         c='#ff7f0e', s=64)
         #plt.title(",".join(self[id]['inst']))

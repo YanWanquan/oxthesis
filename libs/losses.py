@@ -5,11 +5,10 @@
 
 import numpy as np
 import torch 
-
 from enum import IntEnum
 
-def calc_loss_avg_returns(pred_position, return_normalized):
-    return torch.mean(calc_captured_return(pred_position, return_normalized))
+def calc_loss_avg_returns(pred_position, return_normalized): 
+    return -torch.mean(calc_captured_return(pred_position, return_normalized))
 
 def calc_loss_sharpe(pred_position, return_normalized):
     return 1
@@ -30,15 +29,15 @@ class LossHelper:
 
     @staticmethod
     def get_name(loss_type):
-        return {LossTypes.AVG_RETURNS: 'avg returns',
-        LossTypes.SHARPE: 'sharpe', LossTypes.MSE: 'mse'}
+        return {LossTypes.AVG_RETURNS: 'avg-returns',
+        LossTypes.SHARPE: 'sharpe', LossTypes.MSE: 'mse'}[loss_type]
 
     @staticmethod
     def get_loss_function(loss_type):
         return {
             LossTypes.AVG_RETURNS: calc_loss_avg_returns,
             LossTypes.SHARPE: calc_loss_sharpe,
-            LossTypes.MSE: torch.nn.MSELoss
+            LossTypes.MSE: torch.nn.MSELoss()
         }[loss_type]
 
     @staticmethod
@@ -48,3 +47,10 @@ class LossHelper:
             LossTypes.SHARPE: 'position',
             LossTypes.MSE: 'trend'
         }[loss_type]
+
+    @staticmethod
+    def get_output_activation(loss_type):
+        if loss_type == LossTypes.MSE:
+            return lambda x: x
+        else:
+            return torch.tanh

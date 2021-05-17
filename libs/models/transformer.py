@@ -8,6 +8,7 @@ from torch import nn
 import math
 
 from libs.models.embeddings import *
+from libs.losses import LossHelper
 
 # T: window size, B: batch size, C: dim of covariates
 
@@ -17,11 +18,11 @@ class TransformerEncoder(nn.Module):
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and Illia Polosukhin. 2017.
     """
     name = 'transformer'
+    batch_first = False
 
     def __init__(self, d_model, d_input, d_output, n_head, n_layer, n_hidden, dropout, device,
-                 len_input_window, len_output_window):     
+                 len_input_window, len_output_window, loss_type):     
         super(TransformerEncoder, self).__init__()
-        self.model_type = 'transformer'
         self.len_input_window = len_input_window
         self.len_output_window = len_output_window
 
@@ -41,6 +42,7 @@ class TransformerEncoder(nn.Module):
         self.encoder = nn.TransformerEncoder(encoder_layer, n_layer_encoder, encoder_norm)
         # "decoder"
         self.decoder = nn.Linear(d_model, d_output) 
+        self.output_fn = LossHelper.get_output_activation(loss_type)
 
         self.init_weights()
 
@@ -57,7 +59,7 @@ class TransformerEncoder(nn.Module):
         return self.encoder(self.pos_encoder(self.embedding(src)), mask=src_mask)
 
     def decode(self, memory):
-        return self.decoder(memory)
+        return self.output_fn(self.decoder(memory))
 
     def init_weights(self):
         initrange = 0.1    
