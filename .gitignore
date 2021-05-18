@@ -1,12 +1,17 @@
-/data
-/results
-*.code-workspace
+# Project
 *.csv
-
+data/*
+results/*
 .runs/
 
+# VS-Code
+/.vscode
+*.code-workspace
+
+# R
 .RData
 .Rhistory
+*.Rproj
 /R
 
 # --- --- --- --- --- ---

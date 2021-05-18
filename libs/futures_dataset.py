@@ -3,6 +3,10 @@
 # Sven Giegerich / 11.05.2021
 # --
 
+import sys
+import sys
+sys.path.append('../')
+
 import numpy as np
 import pandas as pd
 import torch
@@ -23,8 +27,9 @@ class FuturesDataset(Dataset):
     INP_COLS = ['MACD_8', 'MACD_16', 'MACD_32',
                   'annual_rts', 'semianual_rts',
                   'quarterly_rts', 'monthly_rts',
-                  'daily_rts', 'rts_scaled']
+                  'daily_rts']
     TRG_COLS = ['trg']
+    PLOT_COLS = ['rts_scaled']
 
     def __init__(self, dataloader, dat_type, win_size, tau, step, scaler):
         """
@@ -34,7 +39,7 @@ class FuturesDataset(Dataset):
             win_size (int): the size of the time window (input plus label window)
             tau (int): prediction (label) length for each window (input window = win_size - tau)
             step (int): ..
-            scaler (str): either sklearn's StandardScaler ('scaler') or MinMax ('minmax')
+            scaler (str): either None, sklearn's StandardScaler ('scaler'), or MinMax ('minmax')
         """
         self.dat_type = dat_type
         self.win_size = win_size
@@ -42,10 +47,10 @@ class FuturesDataset(Dataset):
         self.step = step
         self.scaler = scaler
 
-        data_norm = self.normalize_df(
+        data_scal = self.do_scale_df(
            dataloader.df, do_scaler=self.scaler)
         self.data, self.time_index, self.inst_index = self.make_dataset(
-            data_norm[self.dat_type], win_size=win_size, step=step, dim=0)
+            data_scal[self.dat_type], win_size=win_size, step=step, dim=0)
 
         self.cov_lookup = {label: i for i, label in enumerate(
             utils.order_set(dataloader.df[self.dat_type].columns.get_level_values(1)))}
@@ -53,6 +58,8 @@ class FuturesDataset(Dataset):
             i for k, i in self.cov_lookup.items() if k in self.INP_COLS]
         self.trg_indexes = [
             i for k, i in self.cov_lookup.items() if k in self.TRG_COLS]
+        self.plot_indexes = [
+            i for k, i in self.cov_lookup.items() if k in self.PLOT_COLS]
 
     def make_dataset(self, df, win_size, step, dim=0, filter_na=True):
         dat_inst_list = []
@@ -61,7 +68,6 @@ class FuturesDataset(Dataset):
 
         # time stamp ----
         time_lookup_d2i = {d:i for i, d in enumerate(df.index)}
-        time_lookup_i2d = {i:d for i, d in enumerate(df.index)}
 
         for instrument, df_inst in df.groupby(level=0, axis=1):
             ten_inst = torch.from_numpy(df_inst.to_numpy())
@@ -92,13 +98,11 @@ class FuturesDataset(Dataset):
             inst_index = inst_index[~mask.numpy()].reset_index()
             time_ids = time_ids[~mask]
 
-        # rewrite timestamp id to acutal time stamp
-        #time_index = [[time_lookup_i2d[t].strftime("%Y-%m-%d %H:%M:%S") for j, t in enumerate(win)] for i, win in enumerate(time_ids.tolist())]
         time_index = time_ids
 
         return data, time_index, inst_index
 
-    def normalize_df(self, df, do_scaler=None):
+    def do_scale_df(self, df, do_scaler=None):
         if do_scaler is None:
             print("> No scaling used")
             return df 
@@ -140,17 +144,18 @@ class FuturesDataset(Dataset):
             'inp': self.data[idx, :, self.cov_indexes],
             'trg': self.data[idx, :, self.trg_indexes],
             'time': self.time_index[idx],
-            'inst': self.inst_index.iloc[idx].tolist()[1] # index 0 are the numerical ids
+            'inst': self.inst_index.iloc[idx].tolist()[1], # index 0 are the numerical ids
+            'plot': self.data[idx, :, self.plot_indexes]
         }
 
     def plot_example(self, id, model=None, base_df=None):
         """Plots a sample of the dataset"""
         # tbd: replace x-axis by 'time' (can not just add one day as this will confuse with weekends/bank holidays)
-        inp_col = self.cov_indexes.index(self.cov_lookup['rts_scaled'])
+        inp_col = self.plot_indexes.index(self.cov_lookup['rts_scaled'])
 
         plt.figure(figsize=(12, 8))
         plt.subplot(1, 1, 1)
-        plt.plot(range(0, self.win_size-self.tau+1), self[id]['inp']
+        plt.plot(range(0, self.win_size-self.tau+1), self[id]['plot']
                  [:, inp_col], label="Inputs", marker='.', zorder=-10)
         plt.scatter(range(self.tau, self.win_size+1),
                     self[id]['trg'], label="Targets", marker='.', c='#2ca02c', s=64, edgecolors='k')
@@ -179,9 +184,15 @@ if __name__ == "__main__":
     train_dataloader = DataLoader(dataset_train, batch_size=32, shuffle=True)
     x = next(iter(train_dataloader))
     print("Batch example:")
+    print("> Shape:")
     print(x['inp'].shape)
     print(x['trg'].shape)
-    print(x['inst'][1]) # index 0 contains the corresponding indexes of the dataset
+    print(len(x['inst'])) # index 0 contains the corresponding indexes of the dataset
+    print("---")
+    print("> Values:")
+    print(x['inp'][0])
+    print(x['trg'][0])
+    print(x['inst'][0]) # index 0 contains the corresponding indexes of the dataset
 
     dataset_train.plot_example(100)
 

@@ -34,8 +34,8 @@ def evaluate(model, test_iter, base_df, data_info, train_details, model_path=Non
     model.eval()
 
     # evaluate test data ----
-    test_loss = evaluate_model(model, test_iter, train_details)
-    print(f">> Test loss: {test_loss}")
+    #test_loss = evaluate_model(model, test_iter, train_details)
+    #print(f">> Test loss: {test_loss}")
 
     # get predictions & calc strategy returns ----
     df_skeleton = base_df.swaplevel(axis=1)['prs']
@@ -47,7 +47,6 @@ def evaluate(model, test_iter, base_df, data_info, train_details, model_path=Non
     
     # save ----
     scaled_rts.to_csv("scaled_rts.csv")
-
     predictions_file_path = utils.get_save_path(file_label='pred', model=model.name, time_test=train_details['time_test'], file_type='csv', loss_type=train_details['loss_type'])
     predictions.to_csv(predictions_file_path)
     positions_file_path = utils.get_save_path(file_label='pos', model=model.name, time_test=train_details['time_test'], file_type='csv', loss_type=train_details['loss_type'])
@@ -122,37 +121,29 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
             prediction = model(input)
 
             # dim of prediction: B/T x T/B x 1
-            if not model.batch_first: 
-                # time first
+            if not model.batch_first:
                 prediction = prediction.permute(1,0,2).squeeze(-1).numpy() # T x B x 1 -> B x T
             else:
-                # batch first
                 prediction = prediction.squeeze(-1).numpy() # B x T x 1 -> B x T
                 
             # insert predictions to empty df
             for sample_i in range(prediction.shape[0]):
-                # the windows can overlap (determined by step parameter)..
-                # .. therefore just take those predictions that don't overlapp with previous predictions
                 time_id_i = time_id[sample_i] 
-                # for the first window there is no previous value..
-                # .. check if it's the "first" window 
-                is_first_time_win = time_id_i[-1] == (input.shape[1] - 1)
-                if is_first_time_win:
-                    tim_id_sub_i = time_id_i[:]
-                    prediction_i = prediction[sample_i, :][:]
-                else:
-                    tim_id_sub_i = time_id_i[-win_step:]
-                    prediction_i = prediction[sample_i, :][-win_step:]
-
-                time_i = predictions_df.index[tim_id_sub_i]
-
+                time_i = predictions_df.index[time_id_i]
+                prediction_i = prediction[sample_i, :]
                 slicer = (time_i, inst[sample_i])
+
+                if not predictions_df.loc[slicer].isnull().all():
+                    tim_id_sub_i = time_id_i[-win_step:]
+                    time_i_sub = predictions_df.index[tim_id_sub_i]
+                    prediction_i = prediction_i[-win_step:]
+                    slicer = (time_i_sub, inst[sample_i])
+
                 count_df.loc[slicer] += 1
                 predictions_df.loc[slicer] = prediction_i
 
     count_df.to_csv("count_tmp.csv")
 
-    predictions_df = predictions_df.replace(0, np.nan)
     return predictions_df
 
 

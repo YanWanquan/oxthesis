@@ -13,6 +13,7 @@ from libs.futures_dataset import FuturesDataset
 from libs.models.tsmom import *
 from libs.models.transformer import TransformerEncoder
 from libs.models.mlp import MLP
+from libs.models.conv_transformer import ConvTransformerEncoder
 from libs.models.lstm import LSTM
 from libs.losses import LossTypes, LossHelper
 from train import *
@@ -23,14 +24,15 @@ models = {
     'long': LongOnlyStrategy,
     'tsmom': BasicMomentumStrategy,
     'transformer': TransformerEncoder,
-    'lstm': LSTM
+    'lstm': LSTM,
+    'conv_transformer': ConvTransformerEncoder
     #'mlp': MLP
 }
 
 parser = argparse.ArgumentParser(description='Time Series Momentum with Attention-based Models')
 
 def main():
-    arg_model = 'transformer'
+    arg_model = 'conv_transformer'
     # arguments & hyperparameter ----
     filename = "futures_prop.csv"
     index_col = 0
@@ -44,7 +46,7 @@ def main():
     tau = 1
     step = 20
     # ---
-    epochs = 10
+    epochs = 3
     lr = 0.001
     patience = 25
     dropout = 0.1
@@ -93,13 +95,33 @@ def main():
         d_model = 60
         d_input = len(dataset_train.INP_COLS)
         d_output = 1
-        n_head = 4
+        n_head = 8
         n_layer = 1
         n_hidden = d_model * 2
         len_input_window = win_size
         len_output_window = win_size
         model = models[arg_model](
             d_model, d_input, d_output, n_head, n_layer, n_hidden, dropout, device, len_input_window, len_output_window, loss_type=train_details['loss_type']
+        )
+    elif arg_model == 'conv_transformer':
+        d_input = len(dataset_train.INP_COLS)
+        n_head = 8
+        n_layer = 1
+        d_model = 60 # d_model
+        win_len = win_size
+        d_output = 1
+        # seq_num tmp deactivated
+        args = {
+            'sparse': False,
+            'embd_pdrop': 0.1,
+            'attn_pdrop': 0.1,
+            'resid_pdrop': 0.1,
+            'scale_att': False,
+            'q_len': 1, # kernel size for generating key-query
+            'sub_len': 1 # sub_len of sparse attention
+        }
+        model = models[arg_model](
+            d_input=d_input, n_head=n_head, n_layer=n_layer, d_model=d_model, d_output=d_output, args=args, win_len=win_len, loss_type=train_details['loss_type']
         )
     elif arg_model == 'lstm':
         d_input = len(dataset_train.INP_COLS)
@@ -117,15 +139,16 @@ def main():
             d_input=d_input, d_output=d_output, d_hidden=d_hidden, n_layer=n_layer, dropout=dropout, loss_type=train_details['loss_type']
         )
         print(model)
+        print("No linear dataset yet for MLP")
         exit()
     else: 
         raise NotImplementedError("To be done!")
 
     # (3) train & validate ----
-    #model_path = train(model, train_data=train_dataloader, val_data=val_dataloader, train_details=train_details)
+    model_path = train(model, train_data=train_dataloader, val_data=val_dataloader, train_details=train_details)
+    
     #dataset_train.plot_example(0, model=model)
     #dataset_test.plot_example(0, model=model)
-    model_path = 'results/transformer/checkpoint_mse_01-01-1995.pt'
 
     # (4) evaluate ----
     eval_info = {
