@@ -1,7 +1,0 @@
-{
-    "python.pythonPath": "/opt/anaconda3/envs/thesis/bin/python",
-    "terminal.integrated.env.osx": {
-        "PYTHONPATH": "${env:PYTHONPATH}:${workspaceFolder}:${workspaceFolder}/libs:${workspaceFolder}/data"
-    },
-    "python.envFile": "${workspaceFolder}/.env"
-}
