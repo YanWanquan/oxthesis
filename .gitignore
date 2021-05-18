@@ -5,7 +5,8 @@ results/*
 .runs/
 
 # VS-Code
-/.vscode
+.vscode/
+.vscode/*
 *.code-workspace
 
 # R
