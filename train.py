@@ -26,7 +26,7 @@ def train(model, train_data, val_data, train_details):
     writer_path = f".runs/{model.name}/{datetime.now().strftime('%Y-%m-%d-%H-%M')}"
     writer = SummaryWriter(writer_path)
 
-    model = model.double()
+    model = model.to(device).double()
     
     # training details ----
     train_details['optimizer'] = torch.optim.AdamW(model.parameters(), lr=train_details['lr'])

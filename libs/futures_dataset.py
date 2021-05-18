@@ -95,7 +95,7 @@ class FuturesDataset(Dataset):
             data = data[~mask]
 
             # attributes lookup
-            inst_index = inst_index[~mask.numpy()].reset_index()
+            inst_index = inst_index[~mask.cpu().numpy()].reset_index()
             time_ids = time_ids[~mask]
 
         time_index = time_ids
@@ -162,7 +162,7 @@ class FuturesDataset(Dataset):
         if model is not None:
             with torch.no_grad():
                 pred = model(self[id]['inp'].unsqueeze(0))
-                pred = pred.squeeze().numpy()
+                pred = pred.squeeze().cpu().numpy()
             plt.scatter(range(self.tau, self.win_size+1), pred, marker='X', edgecolors='k', label='Predictions',
                         c='#ff7f0e', s=64)
         #plt.title(",".join(self[id]['inst']))

@@ -115,16 +115,16 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
     with torch.no_grad():
         for i, batch in enumerate(data_iter):
             input = batch['inp'].double().to(device)
-            time_id = batch['time'].numpy()
+            time_id = batch['time'].cpu().numpy()
             inst = batch['inst']
 
             prediction = model(input)
 
             # dim of prediction: B/T x T/B x 1
             if not model.batch_first:
-                prediction = prediction.permute(1,0,2).squeeze(-1).numpy() # T x B x 1 -> B x T
+                prediction = prediction.permute(1,0,2).squeeze(-1).cpu().numpy() # T x B x 1 -> B x T
             else:
-                prediction = prediction.squeeze(-1).numpy() # B x T x 1 -> B x T
+                prediction = prediction.squeeze(-1).cpu().numpy() # B x T x 1 -> B x T
                 
             # insert predictions to empty df
             for sample_i in range(prediction.shape[0]):
