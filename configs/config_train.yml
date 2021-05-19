@@ -1,4 +1,4 @@
-CMD: 'python main.py'
+CMD: 'python train.py'
 
 HPARAMS: [
   {
@@ -6,16 +6,16 @@ HPARAMS: [
     # data
     filename: ['futures_prop.csv'],
     start_date: ['01/01/1990'],
-    end_date: ['01/01/2020'],
     test_date: ['01/01/1995'],
+    end_date: ['01/01/2020'],
     # window
-    lead_target: [1],
-    win_size: [30, 60, 90],
+    win_len: [30, 60, 90],
+    step: [20],
     # training
     epochs: [30],
     lr: [0.001],
-    dropout: [0.1],
     batch_size: [64],
+    dropout: [0.1],
     # --- ---
     # all params above are inherited in the next runs
     # --- ---
