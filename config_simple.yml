@@ -12,8 +12,8 @@ HPARAMS: [
     end_date: ['01/01/2020'],
     test_date: ['01/01/1995'],
     # window
-    lead_target: [1],
     win_len: [60],
+    step: 20,
     # training
     epochs: [2],
     lr: [0.001],

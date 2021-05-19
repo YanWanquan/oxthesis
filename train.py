@@ -162,7 +162,7 @@ def main():
     }
 
     # (3) build model ----
-    print("(3) Build model")
+    print(f"(3) Build model: {args.arch}")
     d_input = len(dataset_train.INP_COLS)
     d_output = 1
 
@@ -221,6 +221,15 @@ def main():
 
     # (4) train model ----
     print("(4) Start training")
+
+    if do_log:
+        setting = '{}_{}_ty-{}_wl-{}_ws-{}_nl-{}_dh-{}'.format(args.arch, args.loss_type, pd.to_datetime(
+            args.test_date).year, args.win_len, args.step, args.n_layer, args.d_hidden)
+        if model.name in ['transformer', 'conv_transformer', 'informer']:
+            setting = setting + '_nh-{}'.format(args.n_head,)
+        if model.name == 'conv_transformer':
+            setting = setting + '_ql-{}'.format(args_conv_transf['q_len'])
+        logx.msg(f"Setting: {setting}")
 
     train(model=model, train_iter=train_dataloader,
           val_iter=val_dataloader, train_manager=train_manager, do_log=do_log)
@@ -292,8 +301,8 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         else:
             prediction = model(inputs)
 
-        # transformer model uses the dim: T x B x C
-        if model.name == 'transformer':
+        # e.g. transformer model uses the dim: T x B x C
+        if not model.batch_first:
             labels = labels.permute(1, 0, 2)
 
         loss = loss_fn(prediction, labels)

@@ -12,10 +12,10 @@ HPARAMS: [
     test_date: ['01/01/1995'],
     end_date: ['01/01/2020'],
     # window
-    win_len: [30, 60, 90],
+    win_len: [20, 60],
     step: [20],
     # training
-    epochs: [30],
+    epochs: [50],
     lr: [0.001],
     batch_size: [64],
     dropout: [0.1],
@@ -26,8 +26,8 @@ HPARAMS: [
     RUNX.TAG: 'transformer',
     arch: 'transformer',
     # model hyperparams
-    d_model: [60, 120],
-    n_head: [8],
+    d_model: [60, 240],
+    n_head: [6],
     n_layer: [1,2],
     d_hidden_factor: [2, 4], # replace with a factor
   },
