@@ -54,7 +54,7 @@ def get_args():
     loss_dict = {LossHelper.get_name(loss): loss
                  for loss in LossHelper.get_valid_losses()}
     if platform == "linux" or platform == "linux2":
-        default_log_path = '/nfs/sveng/runx/tmp'
+        default_log_path = '/nfs/home/sveng/runx/tmp'
     elif platform == "darwin":
         default_log_path = '/Users/svengiegerich/runx/tmp'
 

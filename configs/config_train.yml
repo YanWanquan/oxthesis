@@ -2,6 +2,9 @@ CMD: 'python train.py'
 
 HPARAMS: [
   {
+    # runx
+    logdir: LOGDIR,
+    # loss
     loss_type: ['mse'],
     # data
     filename: ['futures_prop.csv'],
