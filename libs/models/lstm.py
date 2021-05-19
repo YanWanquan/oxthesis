@@ -14,21 +14,21 @@ class LSTM(nn.Module):
     name = 'lstm'
     batch_first = True
 
-    def __init__(self, d_input, d_output, d_hidden, dropout, loss_type):
+    def __init__(self, d_input, d_output, n_layer, d_hidden, loss_type, dropout=0):
         super().__init__()
         self.d_input = d_input
         self.d_output = d_output
-        self.n_hidden = d_hidden
+        self.d_hidden = d_hidden
         self.dropout = dropout
-        n_layers = 1 # no stacked LSTM
+        self.n_layer = n_layer
 
-        dropouti = dropout
-        dropoutw = dropout
-        dropouto = dropout
+        if dropout > 0:
+            raise NotImplementedError("Dropout for LSTM not yet implemented!")
 
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
-        self.lstm = LSTMwDropout(input_size=d_input, hidden_size = d_hidden, num_layers=n_layers, batch_first=True, dropoutw=dropoutw, dropouti=dropouti, dropouto=dropouto)
+        self.lstm = nn.LSTM(input_size=d_input, hidden_size=d_hidden, num_layers=n_layer,
+                            batch_first=True)
         self.decoder = nn.Linear(d_hidden, d_output)
 
     def forward(self, src):
@@ -50,7 +50,8 @@ class VariationalDropout(nn.Module):
     Note that this is not applied to the recurrent activations in the LSTM like the above paper.
     Instead, it is applied to the inputs and outputs of the recurrent layer.
     """
-    def __init__(self, dropout: float, batch_first: Optional[bool]=False):
+
+    def __init__(self, dropout: float, batch_first: Optional[bool] = False):
         super().__init__()
         self.dropout = dropout
         self.batch_first = batch_first
@@ -66,19 +67,22 @@ class VariationalDropout(nn.Module):
 
         # Drop same mask across entire sequence
         if self.batch_first:
-            m = x.new_empty(max_batch_size, 1, x.size(2), requires_grad=False).bernoulli_(1 - self.dropout)
+            m = x.new_empty(max_batch_size, 1, x.size(
+                2), requires_grad=False).bernoulli_(1 - self.dropout)
         else:
-            m = x.new_empty(1, max_batch_size, x.size(2), requires_grad=False).bernoulli_(1 - self.dropout)
+            m = x.new_empty(1, max_batch_size, x.size(
+                2), requires_grad=False).bernoulli_(1 - self.dropout)
         x = x.masked_fill(m == 0, 0) / (1 - self.dropout)
 
         if is_packed:
             return pack_padded_sequence(x, seq_lens, batch_first=self.batch_first)
         else:
-            return x 
+            return x
+
 
 class LSTMwDropout(nn.LSTM):
-    def __init__(self, *args, dropouti: float=0.,
-                 dropoutw: float=0., dropouto: float=0.,
+    def __init__(self, *args, dropouti: float = 0.,
+                 dropoutw: float = 0., dropouto: float = 0.,
                  batch_first=True, unit_forget_bias=True, **kwargs):
         super().__init__(*args, **kwargs, batch_first=batch_first)
         self.unit_forget_bias = unit_forget_bias

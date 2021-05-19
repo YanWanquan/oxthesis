@@ -1,0 +1,38 @@
+CMD: 'python main.py'
+
+HPARAMS: [
+  {
+    loss_type: ['mse'],
+    # data
+    filename: ['futures_prop.csv'],
+    start_date: ['01/01/1990'],
+    end_date: ['01/01/2020'],
+    test_date: ['01/01/1995'],
+    # window
+    lead_target: [1],
+    win_size: [60],
+    # training
+    epochs: [5],
+    lr: [0.001],
+    dropout: [0.1],
+    batch_size: [128],
+    # --- ---
+    # all params above are inherited in the next runs
+    # --- ---
+    # architecture specific
+    RUNX.TAG: 'transformer',
+    arch: 'transformer',
+    # model hyperparams
+    d_model: [60],
+    n_head: [8],
+    n_layer: [1],
+    d_hidden: [120], # replace with a factor
+  },
+  {
+    RUNX.TAG: 'lstm',
+    arch: 'lstm',
+    # hyperparams
+    n_layer: [2],
+    d_hidden: [20],
+  }
+]

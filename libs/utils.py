@@ -14,7 +14,7 @@ from libs.losses import LossHelper
 # includes  '<path>/..'
 ROOT_FOLDER = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
 LIB_FOLDER = os.path.join(ROOT_FOLDER, 'libs')
-DATA_FOLDER = os.path.join(ROOT_FOLDER, 'data', 'raw')
+DATA_FOLDER = os.path.join(ROOT_FOLDER, 'data')
 
 MODEL_FOLDER = os.path.join(ROOT_FOLDER, 'model')
 RESULTS_FOLDER = os.path.join(ROOT_FOLDER, 'results')

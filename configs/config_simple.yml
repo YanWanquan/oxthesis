@@ -1,0 +1,34 @@
+CMD: 'python train.py'
+
+HPARAMS: [
+  {
+    # runx
+    logdir: LOGDIR,
+    # main
+    loss_type: ['mse'],
+    # data
+    filename: ['futures_prop.csv'],
+    start_date: ['01/01/1990'],
+    end_date: ['01/01/2020'],
+    test_date: ['01/01/1995'],
+    # window
+    lead_target: [1],
+    win_len: [60],
+    # training
+    epochs: [2],
+    lr: [0.001, 0.1],
+    dropout: [0.1],
+    batch_size: [128],
+    # --- ---
+    # all params above are inherited in the next runs
+    # --- ---
+    # architecture specific
+    RUNX.TAG: 'conv_transformer',
+    arch: 'conv_transformer',
+    # model hyperparams
+    d_model: [60],
+    n_head: [6],
+    n_layer: [1],
+    d_hidden: [120], # replace with a factor
+  }
+]
