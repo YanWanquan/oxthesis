@@ -118,7 +118,8 @@ def main():
     args = get_args()
     if args.logdir is not None:
         do_log = True
-        logx.initialize(logdir=args.logdir, coolname=True, tensorboard=True)
+        logx.initialize(logdir=args.logdir, coolname=True,
+                        tensorboard=True, hparams=vars(args))
     else:
         do_log = False
 
