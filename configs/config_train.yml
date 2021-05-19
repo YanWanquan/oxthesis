@@ -10,12 +10,12 @@ HPARAMS: [
     test_date: ['01/01/1995'],
     # window
     lead_target: [1],
-    win_size: [60],
+    win_size: [30, 60, 90],
     # training
-    epochs: [5],
+    epochs: [30],
     lr: [0.001],
     dropout: [0.1],
-    batch_size: [128],
+    batch_size: [64],
     # --- ---
     # all params above are inherited in the next runs
     # --- ---
@@ -23,16 +23,17 @@ HPARAMS: [
     RUNX.TAG: 'transformer',
     arch: 'transformer',
     # model hyperparams
-    d_model: [60],
+    d_model: [60, 120],
     n_head: [8],
-    n_layer: [1],
-    d_hidden: [120], # replace with a factor
+    n_layer: [1,2],
+    d_hidden_factor: [2, 4], # replace with a factor
   },
   {
-    RUNX.TAG: 'lstm',
-    arch: 'lstm',
-    # hyperparams
-    n_layer: [2],
-    d_hidden: [20],
+    RUNX.TAG: 'conv_transformer',
+    arch: 'conv_transformer',
+  },
+  {
+    RUNX.TAG: 'informer',
+    arch: 'informer',
   }
 ]

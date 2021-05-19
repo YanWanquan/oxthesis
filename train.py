@@ -16,7 +16,7 @@ from runx.logx import logx
 # utils
 import libs.utils as utils
 from libs.losses import LossHelper, LossTypes
-from libs.pytorch_utils import EarlyStopping
+from libs.models.informer import time_features
 # eval
 from evaluate import evaluate_model
 # data
@@ -28,6 +28,7 @@ from libs.models.mlp import MLP
 from libs.models.conv_transformer import ConvTransformerEncoder
 from libs.models.lstm import LSTM
 from libs.losses import LossTypes, LossHelper
+from libs.models.informer import InformerEncoder
 
 # To-Do
 # - add the option not to use logx
@@ -37,7 +38,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 train_archs = {
     'transformer': TransformerEncoder,
     'lstm': LSTM,
-    'conv_transformer': ConvTransformerEncoder
+    'conv_transformer': ConvTransformerEncoder,
+    'informer': InformerEncoder
 }
 
 # --- --- ---
@@ -114,12 +116,15 @@ def get_args():
 
 def main():
     args = get_args()
-    logx.initialize(logdir=args.logdir, coolname=True, tensorboard=True)
+    if args.logdir is not None:
+        do_log = True
+        logx.initialize(logdir=args.logdir, coolname=True, tensorboard=True)
+    else:
+        do_log = False
 
     # (1) load data ----
-    logx.msg("(1) Load data")
+    print("(1) Load data")
     index_col = 0
-    scaler = None
     train_batch_size = args.batch_size
     val_batch_size = 254
     test_batch_size = 254
@@ -128,11 +133,11 @@ def main():
         filename=args.filename, index_col=index_col, start_date=args.start_date, end_date=args.end_date, test_date=args.test_date, lead_target=args.lead_target)
 
     dataset_train = FuturesDataset(
-        base_loader, DataTypes.TRAIN, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler=scaler)
+        base_loader, DataTypes.TRAIN, win_size=args.win_len, tau=args.lead_target, step=args.step)
     dataset_val = FuturesDataset(
-        base_loader, DataTypes.VAL, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler=scaler)
+        base_loader, DataTypes.VAL, win_size=args.win_len, tau=args.lead_target, step=args.step)
     dataset_test = FuturesDataset(
-        base_loader, DataTypes.TEST, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler=scaler)
+        base_loader, DataTypes.TEST, win_size=args.win_len, tau=args.lead_target, step=args.step)
     train_dataloader = DataLoader(
         dataset_train, batch_size=train_batch_size, shuffle=True)
     val_dataloader = DataLoader(
@@ -141,7 +146,7 @@ def main():
         dataset_test, batch_size=test_batch_size, shuffle=False)
 
     # (2) define training meta-data
-    logx.msg("(2) Setup training manager")
+    print("(2) Setup training manager")
     loss_type = LossHelper.get_loss_type(args.loss_type)
     train_manager = {
         # loss
@@ -157,17 +162,18 @@ def main():
     }
 
     # (3) build model ----
-    logx.msg("(3) Build model")
+    print("(3) Build model")
     d_input = len(dataset_train.INP_COLS)
     d_output = 1
+
+    if args.d_hidden_factor > 0:
+        args.d_hidden = args.d_hidden_factor * args.d_model
 
     if args.arch == 'transformer':
         len_input_window = args.win_len
         len_output_window = len_input_window
 
         # check args
-        if args.d_hidden_factor > 0:
-            args.d_hidden = args.d_hidden_factor * args.d_model
         if args.d_model % args.n_head != 0:
             # the dimensionality of multihead attention needs to be divisible by dim of encoder input
             raise ValueError(
@@ -199,21 +205,33 @@ def main():
     elif args.arch == 'lstm':
         model = LSTM(d_input=d_input, d_output=d_output,
                      d_hidden=args.d_hidden, n_layer=args.n_layer, loss_type=train_manager['loss_type'])
+    elif args.arch == 'informer':
+        # tmp: at the moment no hyperparamter
+        freq = 'd'  # daily
+        factor = 5  # factor to sample for prob attention
+        d_ff = args.d_model
+        attn = 'prob'
+        embed = 'fixed'  # could be changed to learnable
+        do_distil = True
+        output_attention = False
+        model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor, d_model=args.d_model, n_heads=args.n_head,
+                                e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed=embed, freq=freq, output_attention=output_attention, distil=do_distil)
     else:
         raise NotImplementedError("Architecture not implemented yet.")
 
     # (4) train model ----
-    logx.msg("(4) Start training")
+    print("(4) Start training")
+
     train(model=model, train_iter=train_dataloader,
-          val_iter=val_dataloader, train_manager=train_manager)
+          val_iter=val_dataloader, train_manager=train_manager, do_log=do_log)
 
-    logx.msg("(5) Finished round")
+    print("(5) Finished round")
 
 # --- --- ---
 # --- --- ---
 
 
-def train(model, train_iter, val_iter, train_manager):
+def train(model, train_iter, val_iter, train_manager, do_log=False):
     model = model.to(device).double()
     best_val_score = np.inf
 
@@ -221,40 +239,43 @@ def train(model, train_iter, val_iter, train_manager):
     train_manager['optimizer'] = torch.optim.AdamW(
         model.parameters(), lr=train_manager['lr'])
 
-    check_point_path = utils.get_save_path(file_label="checkpoint", model=model.name,
-                                           time_test=train_manager['year_test'], file_type="pt", loss_type=train_manager['loss_type'])
-
     # run training ----
     for epoch_i in range(train_manager['epochs']):
         epoch_loss = run_epoch(
-            model=model, train_iter=train_iter, train_manager=train_manager, epoch_i=epoch_i)
+            model=model, train_iter=train_iter, train_manager=train_manager, epoch_i=epoch_i, do_log=do_log)
         val_loss = evaluate_validation(
             model=model, val_iter=val_iter, train_manager=train_manager)
-
-        # verb ----
-        print(
-            f">> Epoch Step: {epoch_i + 1}\t val loss: {val_loss}\t train loss: {epoch_loss}")
-        logx.add_scalar("Loss/val", val_loss, epoch_i)
-
-        metrics_train = {'loss': epoch_loss.data.cpu().numpy()}
-        metrics_val = {'loss': val_loss.data.cpu().numpy()}
-        logx.metric(phase='train', metrics=metrics_train, epoch=epoch_i + 1)
-        logx.metric(phase='val', metrics=metrics_val, epoch=epoch_i + 1)
 
         if val_loss < best_val_score:
             best_val_score = val_loss
 
+        # verb ----
+        epoch_print = f">> Epoch Step: {epoch_i + 1}\t val loss: {val_loss}\t train loss: {epoch_loss}"
+        if do_log:
+            logx.msg(epoch_print)
+            logx.add_scalar("Loss/val", val_loss, epoch_i)
+
+            metrics_train = {'loss': epoch_loss.data.cpu().numpy()}
+            metrics_val = {'loss': val_loss.data.cpu().numpy()}
+            logx.metric(phase='train', metrics=metrics_train,
+                        epoch=epoch_i + 1)
+            logx.metric(phase='val', metrics=metrics_val,
+                        epoch=epoch_i + 1)
+        else:
+            print(epoch_print)
+
         # save ----
-        save_dict = {'epoch': epoch_i + 1,
-                     'arch': model.name,
-                     'state_dict': model.state_dict(),
-                     'best_acc1': best_val_score,
-                     'optimizer': train_manager['optimizer'].state_dict()}
-        logx.save_model(save_dict, metric=val_loss,
-                        epoch=epoch_i + 1, higher_better=False)
+        if do_log:
+            save_dict = {'epoch': epoch_i + 1,
+                         'arch': model.name,
+                         'state_dict': model.state_dict(),
+                         'best_acc1': best_val_score,
+                         'optimizer': train_manager['optimizer'].state_dict()}
+            logx.save_model(save_dict, metric=val_loss,
+                            epoch=epoch_i + 1, higher_better=False)
 
 
-def run_epoch(model, train_iter, train_manager, verb=True, epoch_i=None):
+def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
     model.train()
     optimizer = train_manager['optimizer']
     loss_fn = train_manager['loss_fn']
@@ -265,7 +286,11 @@ def run_epoch(model, train_iter, train_manager, verb=True, epoch_i=None):
         inputs = batch['inp'].double().to(device)
         labels = batch['trg'].double().to(device)
 
-        prediction = model(inputs)
+        if model.name == 'informer':
+            time_embd = batch['time_embd'].double().to(device)
+            prediction = model(inputs, time_embd)
+        else:
+            prediction = model(inputs)
 
         # transformer model uses the dim: T x B x C
         if model.name == 'transformer':
@@ -280,12 +305,15 @@ def run_epoch(model, train_iter, train_manager, verb=True, epoch_i=None):
         optimizer.step()
 
         # log results
-        if epoch_i is not None and i % 5 == 0:
-            writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
-            logx.add_scalar(writer_path, loss, epoch_i * len(train_iter) + i)
+        if do_log:
+            if epoch_i is not None and i % 5 == 0:
+                writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
+                logx.add_scalar(writer_path, loss, epoch_i *
+                                len(train_iter) + i)
+            if i % 100 == 0:
+                logx.msg(
+                    f"\t[max val: {torch.max(prediction)}\tmin val, {torch.min(prediction)}]")
 
-    logx.msg(
-        f"\t[max val: {torch.max(prediction)}\tmin val, {torch.min(prediction)}]")
     return loss
 
 

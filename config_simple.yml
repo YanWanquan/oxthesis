@@ -16,19 +16,19 @@ HPARAMS: [
     win_len: [60],
     # training
     epochs: [2],
-    lr: [0.001, 0.1],
+    lr: [0.001],
     dropout: [0.1],
-    batch_size: [128],
+    batch_size: [64],
     # --- ---
     # all params above are inherited in the next runs
     # --- ---
     # architecture specific
-    RUNX.TAG: 'conv_transformer',
-    arch: 'conv_transformer',
+    RUNX.TAG: 'informer',
+    arch: 'informer',
     # model hyperparams
     d_model: [60],
     n_head: [6],
     n_layer: [1],
-    d_hidden: [120], # replace with a factor
+    d_hidden_factor: [2], # replace with a factor
   }
 ]

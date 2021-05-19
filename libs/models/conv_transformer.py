@@ -3,6 +3,11 @@
 # Sven Giegerich / 18.05.2021
 # --- --- ---
 
+# Code comes directly from the orignal authors via mail.
+# Li, S., Jin, X., Xuan, Y., Zhou, X., Chen, W., Wang, Y.X. and Yan, X., 2019.
+# Enhancing the Locality and Breaking the Memory Bottleneck of Transformer on Time Series Forecasting.
+# Advances in Neural Information Processing Systems, 32, pp.5243-5253.
+
 import numpy as np
 import torch
 import random
@@ -19,11 +24,14 @@ from libs.losses import LossHelper
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 def gelu(x):
     return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
 
+
 def swish(x):
     return x * torch.sigmoid(x)
+
 
 ACT_FNS = {
     'relu': nn.ReLU(),
@@ -31,15 +39,18 @@ ACT_FNS = {
     'gelu': gelu
 }
 
+
 class Attention(nn.Module):
-    def __init__(self,args,n_head,n_embd, win_len, scale,q_len):
+
+    def __init__(self, args, n_head, n_embd, win_len, scale, q_len):
         super(Attention, self).__init__()
 
         if(args['sparse']):
             print('Activate log sparse!')
-            mask = self.log_mask(win_len,args['sub_len'])
+            mask = self.log_mask(win_len, args['sub_len'])
         else:
-            mask = torch.tril(torch.ones(win_len, win_len)).view(1, 1, win_len, win_len)
+            mask = torch.tril(torch.ones(win_len, win_len)
+                              ).view(1, 1, win_len, win_len)
 
         self.register_buffer('mask_tri', mask)
         self.n_head = n_head
@@ -47,18 +58,18 @@ class Attention(nn.Module):
         self.scale = scale
         self.q_len = q_len
         self.query_key = nn.Conv1d(n_embd, n_embd*n_head*2, self.q_len)
-        self.value = Conv1D(n_embd*n_head,1,n_embd)
+        self.value = Conv1D(n_embd*n_head, 1, n_embd)
         self.c_proj = Conv1D(n_embd, 1, n_embd*self.n_head)
         self.attn_dropout = nn.Dropout(args['attn_pdrop'])
         self.resid_dropout = nn.Dropout(args['resid_pdrop'])
 
-    def log_mask(self,win_len,sub_len):
-        mask = torch.zeros((win_len,win_len),dtype=torch.float)
+    def log_mask(self, win_len, sub_len):
+        mask = torch.zeros((win_len, win_len), dtype=torch.float)
         for i in range(win_len):
-            mask[i] = self.row_mask(i,sub_len,win_len)
-        return mask.view(1,1,mask.size(0),mask.size(1))
+            mask[i] = self.row_mask(i, sub_len, win_len)
+        return mask.view(1, 1, mask.size(0), mask.size(1))
 
-    def row_mask(self,index,sub_len,win_len):
+    def row_mask(self, index, sub_len, win_len):
         """
         Remark:
         1 . Currently, dense matrices with sparse multiplication are not supported by Pytorch. Efficient implementation
@@ -70,19 +81,19 @@ class Attention(nn.Module):
             cell can attend, we can allow current cell to attend all past cells to fully
             utilize parallel computing in dense matrices with sparse multiplication."""
         log_l = math.ceil(np.log2(sub_len))
-        mask = torch.zeros((win_len),dtype=torch.float)
-        if((win_len//sub_len)*2*(log_l)>index):
-            mask[:(index+1)]=1
+        mask = torch.zeros((win_len), dtype=torch.float)
+        if((win_len//sub_len)*2*(log_l) > index):
+            mask[:(index+1)] = 1
         else:
-            while(index>=0):
-                if((index - log_l+1)<0):
+            while(index >= 0):
+                if((index - log_l+1) < 0):
                     mask[:index] = 1
                     break
-                mask[index-log_l+1:(index+1)]=1 # Local attention
-                for i in range(0,log_l):
-                    new_index = index - log_l + 1 -2**i
-                    if((index-new_index)<=sub_len and new_index >=0):
-                        mask[new_index]=1
+                mask[index-log_l+1:(index+1)] = 1  # Local attention
+                for i in range(0, log_l):
+                    new_index = index - log_l + 1 - 2**i
+                    if((index-new_index) <= sub_len and new_index >= 0):
+                        mask[new_index] = 1
                 index -= sub_len
         return mask
 
@@ -114,8 +125,8 @@ class Attention(nn.Module):
 
     def forward(self, x):
         value = self.value(x)
-        qk_x = nn.functional.pad(x.permute(0,2,1), pad=(self.q_len-1,0))
-        query_key = self.query_key(qk_x).permute(0,2,1)
+        qk_x = nn.functional.pad(x.permute(0, 2, 1), pad=(self.q_len-1, 0))
+        query_key = self.query_key(qk_x).permute(0, 2, 1)
         query, key = query_key.split(self.split_size, dim=2)
         query = self.split_heads(query)
         key = self.split_heads(key, k=True)
@@ -125,6 +136,7 @@ class Attention(nn.Module):
         attn = self.c_proj(attn)
         attn = self.resid_dropout(attn)
         return attn
+
 
 class Conv1D(nn.Module):
     def __init__(self, out_dim, rf, in_dim):
@@ -148,6 +160,7 @@ class Conv1D(nn.Module):
             raise NotImplementedError
         return x
 
+
 class LayerNorm(nn.Module):
     "Construct a layernorm module in the OpenAI style (epsilon inside the square root)."
 
@@ -163,13 +176,14 @@ class LayerNorm(nn.Module):
         x = (x - mu) / torch.sqrt(sigma + self.e)
         return self.g * x + self.b
 
+
 class MLP(nn.Module):
-    def __init__(self,n_state,n_embd,acf='relu'):
+    def __init__(self, n_state, n_embd, acf='relu'):
         super(MLP, self).__init__()
         n_embd = n_embd
         self.c_fc = Conv1D(n_state, 1, n_embd)
         self.c_proj = Conv1D(n_embd, 1, n_state)
-        self.act =ACT_FNS[acf]
+        self.act = ACT_FNS[acf]
         self.dropout = nn.Dropout(0.1)
 
     def forward(self, x):
@@ -179,10 +193,10 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self,args,n_head, win_len,n_embd, scale,q_len):
+    def __init__(self, args, n_head, win_len, n_embd, scale, q_len):
         super(Block, self).__init__()
         n_embd = n_embd
-        self.attn = Attention(args,n_head, n_embd, win_len, scale,q_len)
+        self.attn = Attention(args, n_head, n_embd, win_len, scale, q_len)
         self.ln_1 = LayerNorm(n_embd)
         self.mlp = MLP(4 * n_embd, n_embd)
         self.ln_2 = LayerNorm(n_embd)
@@ -194,6 +208,7 @@ class Block(nn.Module):
         hidden = self.ln_2(ln1 + mlp)
         return hidden
 
+
 class ConvTransformerEncoder(nn.Module):
     """
     The architecture is based on the paper "...".
@@ -203,7 +218,8 @@ class ConvTransformerEncoder(nn.Module):
     batch_first = True
 
     """ Transformer model """
-    def __init__(self,args,d_input, n_head, n_layer, d_model, win_len, d_output, loss_type, seq_num=None):
+
+    def __init__(self, args, d_input, n_head, n_layer, d_model, win_len, d_output, loss_type, seq_num=None):
         super(ConvTransformerEncoder, self).__init__()
         # SVEN
         # d_model is n_embd here
@@ -216,10 +232,12 @@ class ConvTransformerEncoder(nn.Module):
         self.win_len = win_len
         self.d_output = d_output
         #self.id_embed = nn.Embedding(seq_num,n_embd)
-        self.po_embed = nn.Embedding(self.win_len,self.n_embd)
+        self.po_embed = nn.Embedding(self.win_len, self.n_embd)
         self.drop_em = nn.Dropout(args['embd_pdrop'])
-        block = Block(args,n_head,win_len,self.n_embd+self.d_input, scale=args['scale_att'],q_len=args['q_len'])
-        self.blocks = nn.ModuleList([copy.deepcopy(block) for _ in range(self.n_layer)])
+        block = Block(args, n_head, win_len, self.n_embd+self.d_input,
+                      scale=args['scale_att'], q_len=args['q_len'])
+        self.blocks = nn.ModuleList([copy.deepcopy(block)
+                                    for _ in range(self.n_layer)])
 
         # SVEN
         self.decoder = nn.Linear(self.d_input + self.n_embd, self.d_output)
@@ -229,14 +247,14 @@ class ConvTransformerEncoder(nn.Module):
 
     def forward(self, x, series_id=None):
         #id_embedding = self.id_embed(series_id)
-        length = x.size(1) # (Batch_size,length,input_dim)
+        length = x.size(1)  # (Batch_size,length,input_dim)
         position = torch.arange(length).type(torch.long).to(device)
         po_embedding = self.po_embed(position)
         batch_size = x.size(0)
-        embedding_sum = torch.zeros(batch_size,length,self.n_embd).to(device)
+        embedding_sum = torch.zeros(batch_size, length, self.n_embd).to(device)
         embedding_sum[:] = po_embedding
-        embedding_sum = embedding_sum # + id_embedding.unsqueeze(1)
-        x = torch.cat((x,embedding_sum),dim=2)
+        embedding_sum = embedding_sum  # + id_embedding.unsqueeze(1)
+        x = torch.cat((x, embedding_sum), dim=2)
         for block in self.blocks:
             x = block(x)
 
@@ -251,10 +269,9 @@ class ConvTransformerEncoder(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.Conv1d):
-                nn.init.normal_(m.weight, 0,0.01)
+                nn.init.normal_(m.weight, 0, 0.01)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, 0, 0.01)
                 nn.init.constant_(m.bias, 0)
-    
