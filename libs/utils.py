@@ -10,6 +10,8 @@ import pandas as pd
 import datetime
 from pathlib import Path
 from libs.losses import LossHelper
+import pickle
+from pathlib import Path
 
 # includes  '<path>/..'
 ROOT_FOLDER = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
@@ -38,6 +40,7 @@ def calc_returns_srs(prs, offset, drop_na=False, verb=False):
 def calc_returns_df(df, offset, drop_na=False):
     return df.apply(lambda prs: calc_returns_srs(prs, offset=offset, drop_na=drop_na))
 
+
 def calc_normalized_returns_srs(prs, offset, vol_lookback, vol_target=1, vol_scaling_factor=252, drop_na=False):
     """
     Calculates the normalized returns based on Lim et al. (2020).
@@ -47,7 +50,7 @@ def calc_normalized_returns_srs(prs, offset, vol_lookback, vol_target=1, vol_sca
     rts = calc_returns_srs(prs, offset=offset, drop_na=drop_na)
     vol = rts.ewm(span=vol_lookback, min_periods=vol_lookback).std().fillna(
         method='bfill')
-    vol = vol.shift(1) # avoid look-ahead bias, ! diff to Lim et al. (2020)
+    vol = vol.shift(1)  # avoid look-ahead bias, ! diff to Lim et al. (2020)
     return (rts * vol_target) / (vol * np.sqrt(vol_scaling_factor))
 
 
@@ -83,7 +86,8 @@ def calc_total_returns_df(df, vol_scaling, is_prices=True, vol_lookback=None, vo
         if vol_scaling:
             if vol_lookback is None or vol_target is None:
                 raise ValueError("Invalid parameters!")
-            rts = calc_normalized_returns_df(df=df, offset=1, vol_lookback=vol_lookback, vol_target=vol_target, vol_scaling_factor=vol_scaling_factor)
+            rts = calc_normalized_returns_df(
+                df=df, offset=1, vol_lookback=vol_lookback, vol_target=vol_target, vol_scaling_factor=vol_scaling_factor)
         else:
             rts = calc_returns_df(df=df, offset=1)
     else:
@@ -92,15 +96,17 @@ def calc_total_returns_df(df, vol_scaling, is_prices=True, vol_lookback=None, vo
     trs = (1 + rts).cumprod()
     return trs
 
+
 def order_set(seq):
     """Imitates an ordered set (http://www.peterbe.com/plog/uniqifiers-benchmark)"""
     seen = set()
     seen_add = seen.add
     return [x for x in seq if not (x in seen or seen_add(x))]
 
+
 def calc_strategy_returns(positions, realized_returns, aggregate_by=None):
     """Calculates the returns of a strategy across time and instruments
-    
+
     Args:
         positions (pd.DataFrame): (dim: T x instruments)
         realized_returns (pd.DataFrame) (dim: same)
@@ -115,16 +121,40 @@ def calc_strategy_returns(positions, realized_returns, aggregate_by=None):
     else:
         return str_rts
 
+
 def get_save_path(file_label, model, time_test, file_type="csv", loss_type=None):
     if isinstance(time_test, datetime.datetime):
         time_test = time_test.strftime("%Y-%m-%d")
     elif isinstance(time_test, str):
-        time_test = time_test.replace('/', '-').replace(':', '-').replace(' ', '-')
+        time_test = time_test.replace(
+            '/', '-').replace(':', '-').replace(' ', '-')
 
-    Path(os.path.join(RESULTS_FOLDER, model)).mkdir(parents=True, exist_ok=True)
+    Path(os.path.join(RESULTS_FOLDER, model)).mkdir(
+        parents=True, exist_ok=True)
     file_name = f"{model}/{file_label}"
     if loss_type is not None:
         file_name = file_name + f"_{LossHelper.get_name(loss_type)}"
     file_name = file_name + f"_{time_test}.{file_type}"
     return os.path.join(RESULTS_FOLDER, file_name)
 
+
+def get_scaler_path(filename, start_date, test_date):
+    os.makedirs(os.path.join(RESULTS_FOLDER, 'scaler'), exist_ok=True)
+    filename = filename.replace('.csv', '')
+    path = f"scaler_{filename}_st-{pd.to_datetime(start_date).year}_te-{pd.to_datetime(test_date).year}" + ".scl"
+    return os.path.join(RESULTS_FOLDER, 'scaler', path)
+
+
+def save_scaler(scaler, filename, start_date, test_date):
+    """
+    Args:
+        scaler (sklearn.object)
+    """
+    if scaler is not None:
+        path = get_scaler_path(filename, start_date, test_date)
+        pickle.dump(scaler, open(path, 'wb'))
+
+
+def load_scaler(filename, start_date, test_date):
+    path = get_scaler_path(filename, start_date, test_date)
+    return pickle.load(open(path, 'rb'))

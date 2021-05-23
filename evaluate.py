@@ -8,7 +8,7 @@ import libs.utils as utils
 import pandas as pd
 import numpy as np
 import torch
-
+from runx.logx import logx
 import matplotlib.pyplot as plt
 from libs.position_sizing import PositionSizingHelper
 from libs.losses import LossHelper
@@ -16,7 +16,7 @@ from libs.losses import LossHelper
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def evaluate(model, test_iter, base_df, data_info, train_details, model_path=None):
+def evaluate(model, data_iter, base_df, data_info, train_manager, model_path=None):
     print("> Evaluate")
 
     if model_path is not None:
@@ -36,14 +36,14 @@ def evaluate(model, test_iter, base_df, data_info, train_details, model_path=Non
     model.eval()
 
     # evaluate test data ----
-    #test_loss = evaluate_model(model, test_iter, train_details)
+    #test_loss = evaluate_model(model, data_iter, train_manager)
     #print(f">> Test loss: {test_loss}")
 
     # get predictions & calc strategy returns ----
     df_skeleton = base_df.swaplevel(axis=1)['prs']
-    predictions = calc_predictions_df(model, test_iter, df_shape=df_skeleton.shape,
+    predictions = calc_predictions_df(model, data_iter, df_shape=df_skeleton.shape,
                                       df_index=df_skeleton.index, df_insts=df_skeleton.columns, win_step=data_info['test_win_step'])
-    positions = calc_position_df(predictions, train_details['loss_type'])
+    positions = calc_position_df(predictions, train_manager['loss_type'])
 
     scaled_rts = base_df.xs('rts_scaled', axis=1, level=1, drop_level=True)
     str_returns = utils.calc_strategy_returns(
@@ -52,13 +52,13 @@ def evaluate(model, test_iter, base_df, data_info, train_details, model_path=Non
     # save ----
     scaled_rts.to_csv("scaled_rts.csv")
     predictions_file_path = utils.get_save_path(
-        file_label='pred', model=model.name, time_test=train_details['time_test'], file_type='csv', loss_type=train_details['loss_type'])
+        file_label='pred', model=model.name, time_test=train_manager['time_test'], file_type='csv', loss_type=train_manager['loss_type'])
     predictions.to_csv(predictions_file_path)
     positions_file_path = utils.get_save_path(
-        file_label='pos', model=model.name, time_test=train_details['time_test'], file_type='csv', loss_type=train_details['loss_type'])
+        file_label='pos', model=model.name, time_test=train_manager['time_test'], file_type='csv', loss_type=train_manager['loss_type'])
     positions.to_csv(positions_file_path)
     str_returns_file_path = utils.get_save_path(
-        file_label='rts', model=model.name, time_test=train_details['time_test'], file_type='csv', loss_type=train_details['loss_type'])
+        file_label='rts', model=model.name, time_test=train_manager['time_test'], file_type='csv', loss_type=train_manager['loss_type'])
     str_returns.to_csv(str_returns_file_path)
 
     agg_str_total_returns = calc_total_returns(
@@ -72,8 +72,8 @@ def evaluate(model, test_iter, base_df, data_info, train_details, model_path=Non
     return 1
 
 
-def evaluate_model(model, data_iter, train_details):
-    loss_fn = train_details['loss_fn']
+def evaluate_model(model, data_iter, train_manager, do_log=None):
+    loss_fn = train_manager['loss_fn']
     total_val_loss = 0.
 
     with torch.no_grad():
@@ -92,6 +92,9 @@ def evaluate_model(model, data_iter, train_details):
                 labels = labels.permute(1, 0, 2)
 
             total_val_loss += loss_fn(prediction, labels)
+
+    if do_log:
+        logx.msg(f"Prediction max")
 
     return total_val_loss / (len(data_iter) - 1)
 

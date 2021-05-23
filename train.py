@@ -13,10 +13,12 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import pandas as pd
 from runx.logx import logx
+import pickle
 # utils
 import libs.utils as utils
 from libs.losses import LossHelper, LossTypes
 from libs.models.informer import time_features
+from libs.pytorch_utils import EarlyStopping
 # eval
 from evaluate import evaluate_model
 # data
@@ -68,6 +70,7 @@ def get_args():
         loss_dict.keys()), default="mse", help="Loss function")
     # data ----
     parser.add_argument('--filename', type=str, nargs='?',
+
                         default="futures_prop.csv", help="Filename of corresponding .csv-file")
     parser.add_argument('--start_date', type=str, nargs='?',
                         default="01/01/1990", help="Start date")
@@ -75,22 +78,24 @@ def get_args():
                         default="01/01/1995", help="Test date")
     parser.add_argument('--end_date', type=str, nargs='?',
                         default="01/01/2020", help="Last date")
+    parser.add_argument('--scaler', type=str, nargs='?', choices=['none', 'minmax', 'standard'],
+                        default="standard", help="Sklearn scaler to use")
     # window ----
     parser.add_argument('--lead_target', type=int, nargs='?',
                         default=1, help="The #lead between input and target")
     parser.add_argument('--win_len', type=int, nargs='?',
                         default=63, help="Window length to slice data")
     parser.add_argument('--step', type=int, nargs='?',
-                        default=20, help="If step is not equal win_len the windows will overlap")
+                        default=1, help="If step is not equal win_len the windows will overlap")
     # training ----
     parser.add_argument('--epochs', type=int, nargs='?',
                         default=10, help="Number of maximal epochs")
     parser.add_argument('--patience', type=int, nargs='?',
                         default=25, help="Early stopping rule")
     parser.add_argument('--lr', type=float, nargs='?',
-                        default=0.001, help="Learning rate")
+                        default=0.0001, help="Learning rate")
     parser.add_argument('--batch_size', type=int, nargs='?',
-                        default=32, help="Batch size for training")
+                        default=128, help="Batch size for training")
     parser.add_argument('--dropout', type=float, nargs='?',
                         default=0.1, help="Dropout rate applied to all layers of an arch")
     # model specific params
@@ -134,17 +139,20 @@ def main():
         filename=args.filename, index_col=index_col, start_date=args.start_date, end_date=args.end_date, test_date=args.test_date, lead_target=args.lead_target)
 
     dataset_train = FuturesDataset(
-        base_loader, DataTypes.TRAIN, win_size=args.win_len, tau=args.lead_target, step=args.step)
+        base_loader, DataTypes.TRAIN, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
+    # save scaler for inverse transformation at evaluation
+    utils.save_scaler(dataset_train.scaler, args.filename,
+                      args.start_date, args.test_date)
     dataset_val = FuturesDataset(
-        base_loader, DataTypes.VAL, win_size=args.win_len, tau=args.lead_target, step=args.step)
-    dataset_test = FuturesDataset(
-        base_loader, DataTypes.TEST, win_size=args.win_len, tau=args.lead_target, step=args.step)
+        base_loader, DataTypes.VAL, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
     train_dataloader = DataLoader(
         dataset_train, batch_size=train_batch_size, shuffle=True)
     val_dataloader = DataLoader(
         dataset_val, batch_size=val_batch_size, shuffle=False)
-    test_dataloader = DataLoader(
-        dataset_test, batch_size=test_batch_size, shuffle=False)
+
+    if do_log:
+        logx.msg(
+            f"> Train sample size: {len(train_dataloader) * train_batch_size}")
 
     # (2) define training meta-data
     print("(2) Setup training manager")
@@ -204,8 +212,14 @@ def main():
         model = ConvTransformerEncoder(args=args_conv_transf, d_input=d_input, n_head=args.n_head, n_layer=args.n_layer,
                                        d_model=args.d_model, win_len=args.win_len, d_output=d_output, loss_type=train_manager['loss_type'])
     elif args.arch == 'lstm':
+        dropout = 0.
+        dropoutw = args.dropout
+        dropouti = 0.
+        dropouto = 0.
+        if args.n_layer > 1:
+            d_hidden = [args.d_hidden for l in range(args.n_layer)]
         model = LSTM(d_input=d_input, d_output=d_output,
-                     d_hidden=args.d_hidden, n_layer=args.n_layer, loss_type=train_manager['loss_type'])
+                     d_hidden=args.d_hidden, n_layer=args.n_layer, dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
     elif args.arch == 'informer':
         # tmp: at the moment no hyperparamter
         freq = 'd'  # daily
@@ -235,7 +249,7 @@ def main():
     train(model=model, train_iter=train_dataloader,
           val_iter=val_dataloader, train_manager=train_manager, do_log=do_log)
 
-    print("(5) Finished round")
+    print("(5) Finished training")
 
 # --- --- ---
 # --- --- ---
@@ -248,6 +262,8 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
     # train manager ----
     train_manager['optimizer'] = torch.optim.AdamW(
         model.parameters(), lr=train_manager['lr'])
+    early_stopping = EarlyStopping(
+        patience=train_manager['patience'], path=None, verbose=False)
 
     # run training ----
     for epoch_i in range(train_manager['epochs']):
@@ -260,7 +276,7 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
             best_val_score = val_loss
 
         # verb ----
-        epoch_print = f">> Epoch Step: {epoch_i + 1}\t val loss: {val_loss}\t train loss: {epoch_loss}"
+        epoch_print = f">> Train Epoch {epoch_i + 1}\tval loss: {val_loss}\t train loss: {epoch_loss}"
         if do_log:
             logx.msg(epoch_print)
             logx.add_scalar("Loss/val", val_loss, epoch_i)
@@ -283,6 +299,12 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
                          'optimizer': train_manager['optimizer'].state_dict()}
             logx.save_model(save_dict, metric=val_loss,
                             epoch=epoch_i + 1, higher_better=False)
+
+        # early stopping ----
+        early_stopping(val_loss, model)
+        if early_stopping.early_stop:
+            print(f"> Early stopping")
+            break
 
 
 def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
@@ -315,20 +337,22 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         optimizer.step()
 
         # log results
-        if do_log:
-            if epoch_i is not None and i % 5 == 0:
+        if epoch_i is not None and i % 50 == 0:
+            if do_log:
                 writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
                 logx.add_scalar(writer_path, loss, epoch_i *
                                 len(train_iter) + i)
-            if i % 100 == 0:
-                logx.msg(
-                    f"\t[max val: {torch.max(prediction)}\tmin val, {torch.min(prediction)}]")
+            print_msg = f">> Train Epoch {epoch_i}\tbatch {i}\ttrain loss: {loss}"
+            if do_log:
+                logx.msg(print_msg)
+            else:
+                print(print_msg)
 
     return loss
 
 
-def evaluate_validation(model, val_iter, train_manager):
-    return evaluate_model(model, val_iter, train_manager)
+def evaluate_validation(model, val_iter, train_manager, do_log=False):
+    return evaluate_model(model, val_iter, train_manager, do_log=do_log)
 
 # --- --- ---
 # --- --- ---

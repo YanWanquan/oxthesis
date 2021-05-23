@@ -106,22 +106,31 @@ class FuturesDataset(Dataset):
         return data, time_ids, inst_index, time_embedding
 
     def do_scale_df(self, df, scaler_type=None):
-        if scaler_type is None:
+        if scaler_type is None or scaler_type == 'none':
             print("> No scaling used")
             return df, None
-        elif scaler_type == 'standard':
-            scaler = StandardScaler().fit(df[DataTypes.TRAIN])
+
+        # stack data for scaler
+        df_train_stack = df[DataTypes.TRAIN].stack(level=0)
+
+        if scaler_type == 'standard':
+            print("> Train scaler")
+            scaler = StandardScaler().fit(df_train_stack)
         elif scaler_type == 'minmax':
             scaler = MinMaxScaler(feature_range=(
-                -1, 1)).fit(df[DataTypes.TRAIN])
+                -1, 1)).fit(df_train_stack)
         else:
             raise ValueError("Either use the standard or min/max scaler!")
 
         print(f"> Scaling data with {scaler_type} scaler")
         df_norm = {}
-        for data_type, x in df.items():
-            df_norm[data_type] = pd.DataFrame(scaler.transform(
-                x), index=df[data_type].index, columns=df[data_type].columns)
+        for data_type, x in df.items():  # here unnecessary to scale every type, but useful to keep it general
+            x_stack = x.stack(level=0)
+            x_scaled = scaler.transform(x_stack)
+            df_norm_stack = pd.DataFrame(
+                x_scaled, index=x_stack.index, columns=x_stack.columns)
+            df_norm[data_type] = df_norm_stack.unstack(
+            ).swaplevel(axis=1)  # unstack
 
         return df_norm, scaler
 
