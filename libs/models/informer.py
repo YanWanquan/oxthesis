@@ -18,6 +18,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from math import sqrt
+from libs.losses import LossHelper
 
 from libs.models.embeddings import DataEmbedding
 
@@ -33,7 +34,7 @@ class InformerEncoder(nn.Module):
     name = 'informer'
     batch_first = True
 
-    def __init__(self, enc_in, c_out,
+    def __init__(self, enc_in, c_out, loss_type,
                  factor=5, d_model=512, n_heads=8, e_layers=3, d_ff=512,
                  dropout=0.0, attn='prob', embed='fixed', freq='h', activation='gelu',
                  output_attention=False, distil=True):

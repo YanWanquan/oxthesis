@@ -6,6 +6,9 @@ results/*
 .runx
 sandbox.ipynb
 
+# Pytorch
+*.pth
+
 # VS-Code
 .vscode/
 .vscode/*

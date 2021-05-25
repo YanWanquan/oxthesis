@@ -232,7 +232,7 @@ def main():
         embed = 'fixed'  # could be changed to learnable
         do_distil = True
         output_attention = False
-        model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor, d_model=args.d_model, n_heads=args.n_head,
+        model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor, loss_type=train_manager['loss_type'], d_model=args.d_model, n_heads=args.n_head,
                                 e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed=embed, freq=freq, output_attention=output_attention, distil=do_distil)
     else:
         raise NotImplementedError("Architecture not implemented yet.")

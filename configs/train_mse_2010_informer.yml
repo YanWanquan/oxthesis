@@ -26,10 +26,11 @@ HPARAMS: [
     # --- ---
     # architecture specific
     RUNX.TAG: 'informer',
-    arch: 'informesr',
+    arch: 'informer',
     # model hyperparams
     d_model: [60],
     n_head: [12],
-    n_layer: [1],
+    n_layer: [1, 2],
     d_hidden_factor: [2, 4], # replace with a factor
-  },
+  }
+]
