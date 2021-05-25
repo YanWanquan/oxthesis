@@ -3,6 +3,8 @@
 # Sven Giegerich / 03.05.2021
 # --- --- ---
 
+import os
+import dill
 from datetime import datetime
 from sys import platform
 import argparse
@@ -72,6 +74,8 @@ def get_args():
     parser.add_argument('--filename', type=str, nargs='?',
 
                         default="futures_prop.csv", help="Filename of corresponding .csv-file")
+    parser.add_argument('--frequency', type=str, nargs='?',
+                        default='d', choices=['d'], help="Frequency of the observations")
     parser.add_argument('--start_date', type=str, nargs='?',
                         default="01/01/1990", help="Start date")
     parser.add_argument('--test_date', type=str, nargs='?',
@@ -89,11 +93,11 @@ def get_args():
                         default=1, help="If step is not equal win_len the windows will overlap")
     # training ----
     parser.add_argument('--epochs', type=int, nargs='?',
-                        default=10, help="Number of maximal epochs")
+                        default=1, help="Number of maximal epochs")
     parser.add_argument('--patience', type=int, nargs='?',
                         default=25, help="Early stopping rule")
     parser.add_argument('--lr', type=float, nargs='?',
-                        default=0.0001, help="Learning rate")
+                        default=0.001, help="Learning rate")
     parser.add_argument('--batch_size', type=int, nargs='?',
                         default=128, help="Batch size for training")
     parser.add_argument('--dropout', type=float, nargs='?',
@@ -125,8 +129,6 @@ def main():
         do_log = True
         logx.initialize(logdir=args.logdir, coolname=True,
                         tensorboard=True, hparams=vars(args))
-    else:
-        do_log = False
 
     # (1) load data ----
     print("(1) Load data")
@@ -167,6 +169,7 @@ def main():
         'patience': args.patience,
         'epochs': args.epochs,
         # data
+        'frequency': args.frequency,
         'year_test': pd.to_datetime(args.test_date).year
     }
 
@@ -263,7 +266,7 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
     train_manager['optimizer'] = torch.optim.AdamW(
         model.parameters(), lr=train_manager['lr'])
     early_stopping = EarlyStopping(
-        patience=train_manager['patience'], path=None, verbose=False)
+        patience=train_manager['patience'], path=None, verbose=True)
 
     # run training ----
     for epoch_i in range(train_manager['epochs']):
@@ -294,8 +297,8 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
         if do_log:
             save_dict = {'epoch': epoch_i + 1,
                          'arch': model.name,
-                         'state_dict': model.state_dict(),
-                         'best_acc1': best_val_score,
+                         'train_manager': train_manager,
+                         'model': dill.dumps(model),
                          'optimizer': train_manager['optimizer'].state_dict()}
             logx.save_model(save_dict, metric=val_loss,
                             epoch=epoch_i + 1, higher_better=False)
@@ -317,18 +320,24 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
 
         inputs = batch['inp'].double().to(device)
         labels = batch['trg'].double().to(device)
+        returns = batch['rts'].double().to(device)
 
+        # time embedding?
         if model.name == 'informer':
             time_embd = batch['time_embd'].double().to(device)
             prediction = model(inputs, time_embd)
         else:
             prediction = model(inputs)
 
-        # e.g. transformer model uses the dim: T x B x C
-        if not model.batch_first:
-            labels = labels.permute(1, 0, 2)
+        if LossHelper.use_returns_for_loss(train_manager['loss_type']):
+            if train_manager['loss_type'] == LossTypes.SHARPE:
+                loss = loss_fn(prediction, returns,
+                               freq=train_manager['frequency'])
+            else:
+                loss = loss_fn(prediction, returns)
+        else:
+            loss = loss_fn(prediction, labels)
 
-        loss = loss_fn(prediction, labels)
         loss.backward()
 
         # clip gradients

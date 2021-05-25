@@ -25,21 +25,10 @@ HPARAMS: [
     # all params above are inherited in the next runs
     # --- ---
     # architecture specific
-    RUNX.TAG: 'transformer',
-    arch: 'transformer',
-    # model hyperparams
-    d_model: [60],
-    n_head: [12],
-    n_layer: [1],
-    d_hidden_factor: [2, 4], # replace with a factor
-  },
-  {
-    RUNX.TAG: 'conv_transformer',
-    arch: 'conv_transformer',
-    conv_len: [1, 3, 9],
-  },
-  {
-    RUNX.TAG: 'informer',
-    arch: 'informer',
+    RUNX.TAG: 'lstm',
+    arch: 'lstm',
+    n_layer: 1,
+    d_model: [20, 40, 80],
+    dropout: [1, 0.9, 0.7, 0.2]
   }
 ]

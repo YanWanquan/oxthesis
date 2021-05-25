@@ -69,6 +69,7 @@ class InformerEncoder(nn.Module):
         # SVEN
         # Decoder (aka projection)
         self.decoder = nn.Linear(d_model, c_out, bias=True)
+        self.output_fn = LossHelper.get_output_activation(loss_type)
 
     def forward(self, x_enc, x_mark_enc, enc_self_mask=None):
         enc_out = self.enc_embedding(x_enc, x_mark_enc)
@@ -76,6 +77,7 @@ class InformerEncoder(nn.Module):
 
         # SVEN: leave out the decoder part
         dec_out = self.decoder(enc_out)
+        out = self.output_fn(dec_out)
 
         if self.output_attention:
             return dec_out, attns

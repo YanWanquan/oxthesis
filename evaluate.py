@@ -3,6 +3,8 @@
 # Sven Giegerich / 13.05.2021
 # --- --- ---
 
+
+import argparse
 import os
 import libs.utils as utils
 import pandas as pd
@@ -11,9 +13,30 @@ import torch
 from runx.logx import logx
 import matplotlib.pyplot as plt
 from libs.position_sizing import PositionSizingHelper
-from libs.losses import LossHelper
+from libs.losses import LossHelper, LossTypes
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def get_args():
+    parser = argparse.ArgumentParser(
+        description='Evaluation Mode: Time Series Momentum with Attention-based Models')
+
+    # saved files ----
+    parser.add_argument('--model_path', type=str, nargs='?',
+                        help="Path to the pre-trained model")
+    parser.add_argument('--scaler_path', type=str, nargs='?',
+                        help="Path to the pickled & fitted scaler from training")
+    # data ----
+    parser.add_argument('--start_date', type=str, nargs='?',
+                        default="01/01/1990", help="Start date")
+    parser.add_argument('--test_date', type=str, nargs='?',
+                        default="01/01/1995", help="Test date")
+    parser.add_argument('--end_date', type=str, nargs='?',
+                        default="01/01/2020", help="Last date")
+
+    args = parser.parse_args()
+    return args
 
 
 def evaluate(model, data_iter, base_df, data_info, train_manager, model_path=None):
@@ -36,8 +59,8 @@ def evaluate(model, data_iter, base_df, data_info, train_manager, model_path=Non
     model.eval()
 
     # evaluate test data ----
-    #test_loss = evaluate_model(model, data_iter, train_manager)
-    #print(f">> Test loss: {test_loss}")
+    test_loss = evaluate_model(model, data_iter, train_manager)
+    print(f">> Test loss: {test_loss}")
 
     # get predictions & calc strategy returns ----
     df_skeleton = base_df.swaplevel(axis=1)['prs']
@@ -80,6 +103,7 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
         for i, batch in enumerate(data_iter):
             inputs = batch['inp'].double().to(device)
             labels = batch['trg'].double().to(device)
+            returns = batch['rts'].double().to(device)
 
             if model.name == 'informer':
                 time_embd = batch['time_embd'].double().to(device)
@@ -87,14 +111,16 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
             else:
                 prediction = model(inputs)
 
-            # e.g. transformer model uses the dim: T x B x C
-            if not model.batch_first:
-                labels = labels.permute(1, 0, 2)
+            if LossHelper.use_returns_for_loss(train_manager['loss_type']):
+                if train_manager['loss_type'] == LossTypes.SHARPE:
+                    loss = loss_fn(prediction, returns,
+                                   freq=train_manager['frequency'])
+                else:
+                    loss = loss_fn(prediction, returns)
+            else:
+                loss = loss_fn(prediction, labels)
 
-            total_val_loss += loss_fn(prediction, labels)
-
-    if do_log:
-        logx.msg(f"Prediction max")
+            total_val_loss += loss
 
     return total_val_loss / (len(data_iter) - 1)
 
@@ -200,3 +226,10 @@ def plot_total_returns(total_returns):
     plt.plot(total_returns)
     plt.title("Total return of strategy")
     plt.show()
+
+# --- --- ---
+# --- --- ---
+
+
+if __name__ == "__main__":
+    print("Hey")

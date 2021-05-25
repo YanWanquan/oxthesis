@@ -19,7 +19,7 @@ class TransformerEncoder(nn.Module):
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and Illia Polosukhin. 2017.
     """
     name = 'transformer'
-    batch_first = False
+    batch_first = True
 
     def __init__(self, d_model, d_input, d_output, n_head, n_layer, d_hidden, dropout, device,
                  len_input_window, len_output_window, loss_type):
@@ -56,7 +56,7 @@ class TransformerEncoder(nn.Module):
             src_mask = self.src_mask
 
         memory = self.encode(src, src_mask)
-        return self.decode(memory)
+        return self.decode(memory).permute(1, 0, 2)
 
     def encode(self, src, src_mask):
         return self.encoder(self.pos_encoder(self.embedding(src)), mask=src_mask)

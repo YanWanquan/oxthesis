@@ -8,22 +8,34 @@ import torch
 from enum import IntEnum
 
 
-def calc_loss_avg_returns(pred_position, return_normalized):
-    return -torch.mean(calc_captured_return(pred_position, return_normalized))
-
-
-def calc_loss_sharpe(pred_position, return_normalized):
-    return 1
-
-
-def calc_captured_return(pred_position, return_normalized):
-    return pred_position * return_normalized
-
-
 class LossTypes(IntEnum):
     AVG_RETURNS = 1
     SHARPE = 2
     MSE = 3
+
+
+def calc_loss_avg_returns(pred_position, returns_scaled):
+    return -torch.mean(calc_captured_return(pred_position, returns_scaled))
+
+
+def calc_loss_sharpe(pred_position, returns_scaled, freq='d'):
+    captured_rts = calc_captured_return(pred_position, returns_scaled)
+    avg_rts = torch.mean(captured_rts)
+    avg_sqrt_rts = torch.mean(torch.square(captured_rts))
+    var = avg_sqrt_rts - torch.square(avg_rts)
+    std = torch.sqrt(var + 1e-9)
+
+    if freq == 'd':
+        scale_factor = 252
+    else:
+        return ValueError("Other frequencies in the loss function currently not supported.")
+
+    sharpe = avg_rts / std * np.sqrt(scale_factor)
+    return -sharpe
+
+
+def calc_captured_return(pred_position, returns_scaled):
+    return pred_position * returns_scaled
 
 
 class LossHelper:
@@ -63,3 +75,10 @@ class LossHelper:
             return lambda x: x
         else:
             return torch.tanh
+
+    @staticmethod
+    def use_returns_for_loss(loss_type):
+        if loss_type == LossTypes.MSE:
+            return False
+        else:
+            return True

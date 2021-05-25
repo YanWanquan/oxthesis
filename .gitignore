@@ -4,6 +4,7 @@ data/*
 results/*
 .runs/
 .runx
+sandbox.ipynb
 
 # VS-Code
 .vscode/
