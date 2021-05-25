@@ -1,0 +1,31 @@
+CMD: 'python train.py'
+
+HPARAMS: [
+  {
+    # runx
+    logdir: LOGDIR,
+    # loss
+    loss_type: 'avg-returns',
+    scaler: 'minmax',
+    # data
+    filename: ['futures_prop.csv'],
+    start_date: ['01/01/1990'],
+    test_date: ['01/01/2010'],
+    end_date: ['01/01/2015'],
+    # window
+    win_len: [63],
+    step: [1],
+    # training
+    epochs: [30],
+    lr: [0.0001],
+    batch_size: [64],
+    dropout: [0.1],
+    patience: 10,
+    # architecture specific
+    RUNX.TAG: 'lstm',
+    arch: 'lstm',
+    n_layer: 1,
+    d_model: [20, 40, 80],
+    dropout: [1, 0.9, 0.7, 0.2]
+  }
+]

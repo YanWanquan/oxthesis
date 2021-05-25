@@ -3,6 +3,7 @@
 # Sven Giegerich / 11.05.2021
 # --
 
+from torch._C import device
 from libs.data_loader import BaseDataLoader, DataTypes
 import libs.utils as utils
 from datetime import datetime
@@ -13,6 +14,7 @@ import torch
 import pandas as pd
 import numpy as np
 import sys
+import pickle
 from libs.models.informer import time_features as informer_time_features
 sys.path.append('../')
 
@@ -27,7 +29,7 @@ class FuturesDataset(Dataset):
     RTS_COLS = ['rts_scaled_lead']
     PRS_COLS = ['prs']
 
-    def __init__(self, dataloader, dat_type, win_size, tau, step, scaler_type=None, freq="d"):
+    def __init__(self, dataloader, dat_type, win_size, tau, step, scaler_type=None, scaler=None, freq="d"):
         """
         Args:
             dataload (object): the corresponding dataloader object to load the dataset
@@ -42,10 +44,11 @@ class FuturesDataset(Dataset):
         self.tau = tau
         self.step = step
         self.scaler_type = scaler_type
+        self.scaler = scaler
 
         # id refers to numeric representation of the actual index/col
         data_scal, self.scaler = self.do_scale_df(
-            dataloader.df, scaler_type=self.scaler_type)
+            dataloader.df, scaler_type=self.scaler_type, scaler=scaler)
         self.data, self.time_id, self.inst_index, self.time_embd = self.make_dataset(
             data_scal[self.dat_type], win_size=win_size, step=step, dim=0, freq=freq)
 
@@ -106,26 +109,33 @@ class FuturesDataset(Dataset):
 
         return data, time_ids, inst_index, time_embedding
 
-    def do_scale_df(self, df, scaler_type=None):
-        if scaler_type is None or scaler_type == 'none':
-            print("> No scaling used")
-            return df, None
-
-        # stack data for scaler
-        df_train_stack = df[DataTypes.TRAIN].stack(level=0)
-
-        if scaler_type == 'standard':
-            scaler_inp = StandardScaler().fit(df_train_stack[self.INP_COLS])
-            scaler_trg = StandardScaler().fit(df_train_stack[self.TRG_COLS])
-        elif scaler_type == 'minmax':
-            scaler_inp = MinMaxScaler(feature_range=(
-                -1, 1)).fit(df_train_stack[self.INP_COLS])
-            scaler_trg = MinMaxScaler(feature_range=(
-                -1, 1)).fit(df_train_stack[self.TRG_COLS])
+    def do_scale_df(self, df, scaler_type=None, scaler=None):
+        if scaler is not None:
+            print("> Use fitted scaler")
+            scaler_inp = scaler['inp']
+            scaler_trg = scaler['trg']
         else:
-            raise ValueError("Either use the standard or min/max scaler!")
+            if scaler_type is None or scaler_type == 'none':
+                print("> No scaling used")
+                return df, None
 
-        print(f"> Scaling data with {scaler_type} scaler")
+            # stack data for scaler
+            df_train_stack = df[DataTypes.TRAIN].stack(level=0)
+
+            if scaler_type == 'standard':
+                scaler_inp = StandardScaler().fit(
+                    df_train_stack[self.INP_COLS])
+                scaler_trg = StandardScaler().fit(
+                    df_train_stack[self.TRG_COLS])
+            elif scaler_type == 'minmax':
+                scaler_inp = MinMaxScaler(feature_range=(
+                    -1, 1)).fit(df_train_stack[self.INP_COLS])
+                scaler_trg = MinMaxScaler(feature_range=(
+                    -1, 1)).fit(df_train_stack[self.TRG_COLS])
+            else:
+                raise ValueError("Either use the standard or min/max scaler!")
+
+        print(f"> Scaling data with {type(scaler_inp)} scaler")
         df_norm = {}
         for data_type, df_i in df.items():  # here unnecessary to scale every type, but useful to keep it general
             # input ----
@@ -191,24 +201,46 @@ class FuturesDataset(Dataset):
             'prs': self.data[idx, :, self.prs_indexes]
         }
 
-    def plot_example(self, id, model=None, base_df=None):
+    def plot_example(self, id, model=None, scaler=None):
         """Plots a sample of the dataset"""
         # tbd: replace x-axis by 'time' (can not just add one day as this will confuse with weekends/bank holidays)
-        inp_col = self.rts_indexes.index(self.cov_lookup['rts_scaled'])
+        inp_col = self.rts_indexes.index(self.cov_lookup['rts_scaled_lead'])
+
+        if scaler is not None:
+            trg = self[id]['trg'].cpu().numpy()
+            trg = scaler['trg'].inverse_transform(trg.reshape(-1, 1)).flatten()
+        else:
+            trg = self[id]['trg']
 
         plt.figure(figsize=(12, 8))
         plt.subplot(1, 1, 1)
+
+        # observed returns
         plt.plot(range(0, self.win_size-self.tau+1), self[id]['rts']
                  [:, inp_col], label="Inputs", marker='.', zorder=-10)
+
+        # target
         plt.scatter(range(self.tau, self.win_size+1),
-                    self[id]['trg'], label="Targets", marker='.', c='#2ca02c', s=64, edgecolors='k')
+                    trg, label="Targets", marker='.', c='#2ca02c', s=64, edgecolors='k')
+
         if model is not None:
             with torch.no_grad():
-                pred = model(self[id]['inp'].unsqueeze(0))
+                if model.name == 'informer':
+                    pred = model(self[id]['inp'].unsqueeze(
+                        0), self[id]['time_embd'].unsqueeze(0))
+                else:
+                    pred = model(self[id]['inp'].unsqueeze(0))
                 pred = pred.squeeze().cpu().numpy()
+
+                if scaler is not None:
+                    # TMP: only if loss type is MSE
+                    pred = scaler['trg'].inverse_transform(
+                        pred.reshape(-1, 1)).flatten()
+
             plt.scatter(range(self.tau, self.win_size+1), pred, marker='X', edgecolors='k', label='Predictions',
                         c='#ff7f0e', s=64)
-        # plt.title(",".join(self[id]['inst']))
+
+        plt.title(self[id]['inst'])
         plt.legend()
         plt.show()
 

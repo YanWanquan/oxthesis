@@ -28,7 +28,6 @@ from libs.data_loader import BaseDataLoader, DataTypes
 from libs.futures_dataset import FuturesDataset
 # models
 from libs.models.transformer import TransformerEncoder
-from libs.models.mlp import MLP
 from libs.models.conv_transformer import ConvTransformerEncoder
 from libs.models.lstm import LSTM
 from libs.losses import LossTypes, LossHelper
@@ -72,7 +71,6 @@ def get_args():
         loss_dict.keys()), default="mse", help="Loss function")
     # data ----
     parser.add_argument('--filename', type=str, nargs='?',
-
                         default="futures_prop.csv", help="Filename of corresponding .csv-file")
     parser.add_argument('--frequency', type=str, nargs='?',
                         default='d', choices=['d'], help="Frequency of the observations")
@@ -143,8 +141,8 @@ def main():
     dataset_train = FuturesDataset(
         base_loader, DataTypes.TRAIN, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
     # save scaler for inverse transformation at evaluation
-    utils.save_scaler(dataset_train.scaler, args.filename,
-                      args.start_date, args.test_date)
+    scaler_path = utils.save_scaler(dataset_train.scaler, args.filename,
+                                    args.start_date, args.test_date)
     dataset_val = FuturesDataset(
         base_loader, DataTypes.VAL, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
     train_dataloader = DataLoader(
@@ -160,6 +158,8 @@ def main():
     print("(2) Setup training manager")
     loss_type = LossHelper.get_loss_type(args.loss_type)
     train_manager = {
+        # args
+        'args': vars(args),
         # loss
         'loss_label': args.loss_type,
         'loss_type': loss_type,
@@ -170,7 +170,9 @@ def main():
         'epochs': args.epochs,
         # data
         'frequency': args.frequency,
-        'year_test': pd.to_datetime(args.test_date).year
+        'year_test': pd.to_datetime(args.test_date).year,
+        # scaler
+        'scaler_path': scaler_path
     }
 
     # (3) build model ----
@@ -240,14 +242,17 @@ def main():
     # (4) train model ----
     print("(4) Start training")
 
+    train_manager['setting'] = '{}_{}_ty-{}_wl-{}_ws-{}_nl-{}_dh-{}'.format(args.arch, args.loss_type, pd.to_datetime(
+        args.test_date).year, args.win_len, args.step, args.n_layer, args.d_hidden)
+
     if do_log:
-        setting = '{}_{}_ty-{}_wl-{}_ws-{}_nl-{}_dh-{}'.format(args.arch, args.loss_type, pd.to_datetime(
-            args.test_date).year, args.win_len, args.step, args.n_layer, args.d_hidden)
         if model.name in ['transformer', 'conv_transformer', 'informer']:
-            setting = setting + '_nh-{}'.format(args.n_head,)
+            train_manager['setting'] = train_manager['setting'] + \
+                '_nh-{}'.format(args.n_head,)
         if model.name == 'conv_transformer':
-            setting = setting + '_ql-{}'.format(args_conv_transf['q_len'])
-        logx.msg(f"Setting: {setting}")
+            train_manager['setting'] = train_manager['setting'] + \
+                '_ql-{}'.format(args_conv_transf['q_len'])
+        logx.msg(f"Setting: {train_manager['setting']}")
 
     train(model=model, train_iter=train_dataloader,
           val_iter=val_dataloader, train_manager=train_manager, do_log=do_log)

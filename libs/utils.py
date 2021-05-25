@@ -12,6 +12,7 @@ from pathlib import Path
 from libs.losses import LossHelper
 import pickle
 from pathlib import Path
+import torch
 
 # includes  '<path>/..'
 ROOT_FOLDER = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..")
@@ -20,6 +21,8 @@ DATA_FOLDER = os.path.join(ROOT_FOLDER, 'data')
 
 MODEL_FOLDER = os.path.join(ROOT_FOLDER, 'model')
 RESULTS_FOLDER = os.path.join(ROOT_FOLDER, 'results')
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- --- ---
 
@@ -122,7 +125,7 @@ def calc_strategy_returns(positions, realized_returns, aggregate_by=None):
         return str_rts
 
 
-def get_save_path(file_label, model, time_test, file_type="csv", loss_type=None):
+def get_save_path(file_label, model, time_test, setting=None, file_type="csv"):
     if isinstance(time_test, datetime.datetime):
         time_test = time_test.strftime("%Y-%m-%d")
     elif isinstance(time_test, str):
@@ -132,9 +135,9 @@ def get_save_path(file_label, model, time_test, file_type="csv", loss_type=None)
     Path(os.path.join(RESULTS_FOLDER, model)).mkdir(
         parents=True, exist_ok=True)
     file_name = f"{model}/{file_label}"
-    if loss_type is not None:
-        file_name = file_name + f"_{LossHelper.get_name(loss_type)}"
-    file_name = file_name + f"_{time_test}.{file_type}"
+    if setting is not None:
+        file_name = file_name + f"_{setting}"
+    file_name = file_name + f"_||_{time_test}.{file_type}"
     return os.path.join(RESULTS_FOLDER, file_name)
 
 
@@ -153,8 +156,26 @@ def save_scaler(scaler, filename, start_date, test_date):
     if scaler is not None:
         path = get_scaler_path(filename, start_date, test_date)
         pickle.dump(scaler, open(path, 'wb'))
+        return path
+    else:
+        return False
 
 
+# Currently not used
 def load_scaler(filename, start_date, test_date):
     path = get_scaler_path(filename, start_date, test_date)
     return pickle.load(open(path, 'rb'))
+
+
+def inverse_scale_tensor(df, scaler_dict):
+    """
+    Args:
+        labels (pytorch.tensor): (dim: B x T)
+    """
+    def inverse_scale_per_feature(series):
+        array = series.to_numpy().reshape(-1, 1)
+        x = scaler_dict['trg'].inverse_transform(array)
+        return pd.Series(x.flatten(), index=series.index)
+
+    df_inv = df.apply(inverse_scale_per_feature)
+    return df_inv
