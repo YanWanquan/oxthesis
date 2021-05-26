@@ -51,7 +51,7 @@ class InformerEncoder(nn.Module):
         self.encoder = Encoder(
             [
                 EncoderLayer(
-                    AttentionLayer(Attn(False, factor, attention_dropout=dropout, output_attention=output_attention),
+                    AttentionLayer(Attn(mask_flag=True, factor=factor, attention_dropout=dropout, output_attention=output_attention),
                                    d_model, n_heads, mix=False),
                     d_model,
                     d_ff,
@@ -73,7 +73,6 @@ class InformerEncoder(nn.Module):
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
     def forward(self, x_enc, x_mark_enc, enc_self_mask=None):
-
         if enc_self_mask is None:
             enc_self_mask = self.generate_causal_mask(x_enc.shape[1])
 
@@ -170,7 +169,7 @@ class Encoder(nn.Module):
                 x, attn = attn_layer(x, attn_mask=attn_mask)
                 x = conv_layer(x)
                 attns.append(attn)
-            x, attn = self.attn_layers[-1](x)
+            x, attn = self.attn_layers[-1](x, attn_mask=attn_mask)
             attns.append(attn)
         else:
             for attn_layer in self.attn_layers:
