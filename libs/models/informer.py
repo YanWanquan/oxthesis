@@ -73,6 +73,10 @@ class InformerEncoder(nn.Module):
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
     def forward(self, x_enc, x_mark_enc, enc_self_mask=None):
+
+        if enc_self_mask is None:
+            enc_self_mask = self.generate_causal_mask(x_enc.shape[1])
+
         enc_out = self.enc_embedding(x_enc, x_mark_enc)
         enc_out, attns = self.encoder(enc_out, attn_mask=enc_self_mask)
 
@@ -84,6 +88,12 @@ class InformerEncoder(nn.Module):
             return dec_out, attns
         else:
             return dec_out  # [B, L, D]
+
+    def generate_causal_mask(self, size):
+        mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float(
+            '-inf')).masked_fill(mask == 1, float(0.0))
+        return mask
 
 
 # --- ---

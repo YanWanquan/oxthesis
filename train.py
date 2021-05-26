@@ -351,7 +351,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         optimizer.step()
 
         # log results
-        if epoch_i is not None and i % 50 == 0:
+        if epoch_i is not None and i % 200 == 0:
             if do_log:
                 writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
                 logx.add_scalar(writer_path, loss, epoch_i *

@@ -40,6 +40,74 @@ ACT_FNS = {
 }
 
 
+class ConvTransformerEncoder(nn.Module):
+    """
+    The architecture is based on the paper "...".
+    """
+
+    name = 'conv_transformer'
+    batch_first = True
+
+    """ Transformer model """
+
+    def __init__(self, args, d_input, n_head, n_layer, d_model, win_len, d_output, loss_type, seq_num=None):
+        super(ConvTransformerEncoder, self).__init__()
+        # SVEN
+        # d_model is n_embd here
+        # TMP: deactivated sequence embedding
+        self.d_input = d_input
+        self.n_head = n_head
+        #self.seq_num = seq_num
+        self.n_embd = d_model
+        self.n_layer = n_layer
+        self.win_len = win_len
+        self.d_output = d_output
+        #self.id_embed = nn.Embedding(seq_num,n_embd)
+        self.po_embed = nn.Embedding(self.win_len, self.n_embd)
+        self.drop_em = nn.Dropout(args['embd_pdrop'])
+        block = Block(args, n_head, win_len, self.n_embd+self.d_input,
+                      scale=args['scale_att'], q_len=args['q_len'])
+        self.blocks = nn.ModuleList([copy.deepcopy(block)
+                                    for _ in range(self.n_layer)])
+
+        # SVEN
+        self.decoder = nn.Linear(self.d_input + self.n_embd, self.d_output)
+        self.output_fn = LossHelper.get_output_activation(loss_type)
+
+        self.init_weights()
+
+    def forward(self, x, series_id=None):
+        #id_embedding = self.id_embed(series_id)
+        length = x.size(1)  # (Batch_size,length,input_dim)
+        position = torch.arange(length).type(torch.long).to(device)
+        po_embedding = self.po_embed(position)
+        batch_size = x.size(0)
+        embedding_sum = torch.zeros(batch_size, length, self.n_embd).to(device)
+        embedding_sum[:] = po_embedding
+        embedding_sum = embedding_sum  # + id_embedding.unsqueeze(1)
+        x = torch.cat((x, embedding_sum), dim=2)
+        for block in self.blocks:
+            x = block(x)
+
+        # SVEN
+        pred = self.decoder(x)
+        return self.output_fn(pred)
+
+    # SVEN
+    def init_weights(self):
+        #nn.init.normal_(self.id_embed.weight, std=0.02)
+        nn.init.normal_(self.po_embed.weight, std=0.02)
+
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.normal_(m.weight, 0, 0.01)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+
+
 class Attention(nn.Module):
 
     def __init__(self, args, n_head, n_embd, win_len, scale, q_len):
@@ -207,71 +275,3 @@ class Block(nn.Module):
         mlp = self.mlp(ln1)
         hidden = self.ln_2(ln1 + mlp)
         return hidden
-
-
-class ConvTransformerEncoder(nn.Module):
-    """
-    The architecture is based on the paper "...".
-    """
-
-    name = 'conv_transformer'
-    batch_first = True
-
-    """ Transformer model """
-
-    def __init__(self, args, d_input, n_head, n_layer, d_model, win_len, d_output, loss_type, seq_num=None):
-        super(ConvTransformerEncoder, self).__init__()
-        # SVEN
-        # d_model is n_embd here
-        # TMP: deactivated sequence embedding
-        self.d_input = d_input
-        self.n_head = n_head
-        #self.seq_num = seq_num
-        self.n_embd = d_model
-        self.n_layer = n_layer
-        self.win_len = win_len
-        self.d_output = d_output
-        #self.id_embed = nn.Embedding(seq_num,n_embd)
-        self.po_embed = nn.Embedding(self.win_len, self.n_embd)
-        self.drop_em = nn.Dropout(args['embd_pdrop'])
-        block = Block(args, n_head, win_len, self.n_embd+self.d_input,
-                      scale=args['scale_att'], q_len=args['q_len'])
-        self.blocks = nn.ModuleList([copy.deepcopy(block)
-                                    for _ in range(self.n_layer)])
-
-        # SVEN
-        self.decoder = nn.Linear(self.d_input + self.n_embd, self.d_output)
-        self.output_fn = LossHelper.get_output_activation(loss_type)
-
-        self.init_weights()
-
-    def forward(self, x, series_id=None):
-        #id_embedding = self.id_embed(series_id)
-        length = x.size(1)  # (Batch_size,length,input_dim)
-        position = torch.arange(length).type(torch.long).to(device)
-        po_embedding = self.po_embed(position)
-        batch_size = x.size(0)
-        embedding_sum = torch.zeros(batch_size, length, self.n_embd).to(device)
-        embedding_sum[:] = po_embedding
-        embedding_sum = embedding_sum  # + id_embedding.unsqueeze(1)
-        x = torch.cat((x, embedding_sum), dim=2)
-        for block in self.blocks:
-            x = block(x)
-
-        # SVEN
-        pred = self.decoder(x)
-        return self.output_fn(pred)
-
-    # SVEN
-    def init_weights(self):
-        #nn.init.normal_(self.id_embed.weight, std=0.02)
-        nn.init.normal_(self.po_embed.weight, std=0.02)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv1d):
-                nn.init.normal_(m.weight, 0, 0.01)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)
