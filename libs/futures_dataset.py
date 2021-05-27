@@ -8,6 +8,7 @@ from libs.data_loader import BaseDataLoader, DataTypes
 import libs.utils as utils
 from datetime import datetime
 import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.preprocessing import StandardScaler, MinMaxScaler
 from torch.utils.data import Dataset
 import torch
@@ -228,6 +229,10 @@ class FuturesDataset(Dataset):
                 if model.name == 'informer':
                     pred = model(self[id]['inp'].unsqueeze(
                         0), self[id]['time_embd'].unsqueeze(0))
+                    if len(pred) > 1:
+                        # returns also the attention
+                        attn = pred[1]
+                        pred = pred[0]
                 else:
                     pred = model(self[id]['inp'].unsqueeze(0))
                 pred = pred.squeeze().cpu().numpy()
@@ -243,6 +248,15 @@ class FuturesDataset(Dataset):
         plt.title(self[id]['inst'])
         plt.legend()
         plt.show()
+
+        # Attention
+        if 'attn' in locals():
+            atten_i = attn[0][0][0].detach().cpu().numpy()
+            fig, ax = plt.subplots(figsize=(10, 10))
+            sns.heatmap(atten_i, ax=ax, cmap="Spectral")
+            return atten_i
+        else:
+            return None
 
 # --- --- ---
 

@@ -183,6 +183,10 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
             if model.name == 'informer':
                 time_embd = batch['time_embd'].double().to(device)
                 prediction = model(inputs, time_embd)
+
+                if len(prediction) > 1:
+                    # returns also the attention
+                    prediction = prediction[0]
             else:
                 prediction = model(inputs)
 

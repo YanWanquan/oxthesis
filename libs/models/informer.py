@@ -19,6 +19,7 @@ import torch.nn.functional as F
 import numpy as np
 from math import sqrt
 from libs.losses import LossHelper
+import pickle
 
 from libs.models.embeddings import DataEmbedding
 
@@ -37,10 +38,16 @@ class InformerEncoder(nn.Module):
     def __init__(self, enc_in, c_out, loss_type,
                  factor=5, d_model=512, n_heads=8, e_layers=3, d_ff=512,
                  dropout=0.0, attn='prob', embed='fixed', freq='h', activation='gelu',
-                 output_attention=False, distil=True):
+                 output_attention=True, distil=True, win_len=None):
         super(InformerEncoder, self).__init__()
         self.attn = attn
         self.output_attention = output_attention
+        self.win_len = win_len
+
+        if self.win_len is not None:
+            self.enc_self_mask = self.generate_causal_mask(win_len)
+
+        mask_flag = True
 
         # Encoding
         self.enc_embedding = DataEmbedding(
@@ -51,7 +58,7 @@ class InformerEncoder(nn.Module):
         self.encoder = Encoder(
             [
                 EncoderLayer(
-                    AttentionLayer(Attn(mask_flag=True, factor=factor, attention_dropout=dropout, output_attention=output_attention),
+                    AttentionLayer(Attn(mask_flag=mask_flag, factor=factor, attention_dropout=dropout, output_attention=output_attention),
                                    d_model, n_heads, mix=False),
                     d_model,
                     d_ff,
@@ -73,8 +80,8 @@ class InformerEncoder(nn.Module):
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
     def forward(self, x_enc, x_mark_enc, enc_self_mask=None):
-        if enc_self_mask is None:
-            enc_self_mask = self.generate_causal_mask(x_enc.shape[1])
+        # if enc_self_mask is None:
+        #   enc_self_mask = self.generate_causal_mask(x_enc.shape[1])
 
         enc_out = self.enc_embedding(x_enc, x_mark_enc)
         enc_out, attns = self.encoder(enc_out, attn_mask=enc_self_mask)
@@ -84,9 +91,9 @@ class InformerEncoder(nn.Module):
         out = self.output_fn(dec_out)
 
         if self.output_attention:
-            return dec_out, attns
+            return out, attns
         else:
-            return dec_out  # [B, L, D]
+            return out  # [B, L, D]
 
     def generate_causal_mask(self, size):
         mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)

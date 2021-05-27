@@ -230,10 +230,10 @@ def main():
         freq = 'd'  # daily
         factor = 5  # factor to sample for prob attention
         d_ff = args.d_model
-        attn = 'prob'
+        attn = 'full'
         embed = 'fixed'  # could be changed to learnable
         do_distil = True
-        output_attention = False
+        output_attention = True
         model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor, loss_type=train_manager['loss_type'], d_model=args.d_model, n_heads=args.n_head,
                                 e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed=embed, freq=freq, output_attention=output_attention, distil=do_distil)
     else:
@@ -331,6 +331,10 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         if model.name == 'informer':
             time_embd = batch['time_embd'].double().to(device)
             prediction = model(inputs, time_embd)
+
+            if len(prediction) > 1:
+                # returns also the attention
+                prediction = prediction[0]
         else:
             prediction = model(inputs)
 

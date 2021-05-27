@@ -5,6 +5,7 @@ results/*
 .runs/
 .runx
 sandbox.ipynb
+*.p
 
 # Pytorch
 *.pth
