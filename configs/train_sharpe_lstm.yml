@@ -26,27 +26,26 @@ HPARAMS: [
     # --- ---
     # architecture specific
     RUNX.TAG: 'lstm_1995',
-    arch: 'transformer',
+    arch: 'lstm',
     # model hyperparams
-    d_model: [60],
-    n_head: [12],
-    n_layer: [1],
-    d_hidden_factor: [2], # replace with a factor
+    n_layer: 1,
+    d_model: [20],
+    dropout: [1]
   }, 
   {
-    RUNX.TAG: 'transformer_2010',
+    RUNX.TAG: 'lstm_2010',
     test_date: ['01/01/2010'],
   },
   {
-    RUNX.TAG: 'transformer_2005',
+    RUNX.TAG: 'lstm_2005',
     test_date: ['01/01/2005'],
   },
   {
-    RUNX.TAG: 'transformer_2000',
+    RUNX.TAG: 'lstm_2000',
     test_date: ['01/01/2000'],
   },
   {
-    RUNX.TAG: 'transformer_2015',
+    RUNX.TAG: 'lstm_2015',
     test_date: ['01/01/2015'],
   }
 ]
