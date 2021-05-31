@@ -27,7 +27,8 @@ class TransformerEncoder(nn.Module):
         self.len_input_window = len_input_window
         self.len_output_window = len_output_window
 
-        self.src_mask = self.generate_mask(self.len_input_window).to(device)
+        self.src_mask = self.generate_causal_mask(
+            self.len_input_window).to(device)
 
         # for simplicity give encoder and decoder the same size
         d_hidden_encoder = d_hidden
