@@ -25,7 +25,7 @@ HPARAMS: [
     # all params above are inherited in the next runs
     # --- ---
     # architecture specific
-    RUNX.TAG: 'transformer_1995',
+    RUNX.TAG: 'lstm_1995',
     arch: 'transformer',
     # model hyperparams
     d_model: [60],
