@@ -203,7 +203,7 @@ class BaseDataLoader:
         inactive_flags = self.flag_inactive_sequences(prs)
         prs = (prs * (1 - inactive_flags)).replace({0: np.nan})
 
-        prs = self.winzorize_df(prs, halflife=smooth_window, threshold=5)
+        prs = self.winzorize_df(prs, halflife=smooth_window, threshold=3)
 
         return prs
 

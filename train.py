@@ -230,7 +230,7 @@ def main():
         freq = 'd'  # daily
         factor = 5  # factor to sample for prob attention
         d_ff = args.d_model
-        attn = 'full'
+        attn = 'prob'  # 'full' or 'prob'
         embed = 'fixed'  # could be changed to learnable
         do_distil = True
         output_attention = True
