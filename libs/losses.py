@@ -72,7 +72,7 @@ class LossHelper:
     @staticmethod
     def get_output_activation(loss_type):
         if loss_type == LossTypes.MSE:
-            return lambda x: x
+            return torch.tanh  # was lambda x: x before
         else:
             return torch.tanh
 

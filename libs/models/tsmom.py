@@ -5,9 +5,11 @@
 
 from os import stat
 import numpy as np
+import pandas as pd
 from abc import ABC, abstractmethod
 
 import libs.utils as utils
+
 
 class MomentumInterface(ABC):
 
@@ -25,18 +27,22 @@ class MomentumInterface(ABC):
 
         signals = self.calc_signal(prices)
         positions = self.calc_position(signals)
-        return utils.calc_strategy_returns(positions=positions, realized_returns=scaled_rts)
+        returns = utils.calc_strategy_returns(
+            positions=positions, realized_returns=scaled_rts)
+
+        return (positions, returns)
+
 
 class LongOnlyStrategy(MomentumInterface):
     name = 'long'
 
     @staticmethod
     def calc_signal(prices):
-        return np.ones(prices.shape)
+        return pd.DataFrame(np.ones(prices.shape), index=prices.index, columns=prices.columns)
 
     @staticmethod
     def calc_position(signals):
-        return np.ones(signals.shape)
+        return pd.DataFrame(np.ones(signals.shape), index=signals.index, columns=signals.columns)
 
 
 class BasicMomentumStrategy(MomentumInterface):
@@ -65,6 +71,7 @@ class BasicMomentumStrategy(MomentumInterface):
             signals (pd.Dataframe): dataframe of signals (dim: T x instruments)
         """
         return signals.apply(np.sign)
+
 
 class MACDStrategy(MomentumInterface):
     """

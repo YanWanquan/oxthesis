@@ -76,18 +76,18 @@ class DataTypes(IntEnum):
 class BaseDataLoader:
 
     def __init__(self, filename, index_col, start_date, end_date, test_date, lead_target):
-        self.start_date = start_date
-        self.end_date = end_date
-        self.test_date = test_date
+        self.start_date = pd.to_datetime(start_date)
+        self.end_date = pd.to_datetime(end_date)
+        self.test_date = pd.to_datetime(test_date)
 
         self.raw_df = self.load_raw_df(filename, index_col)
         self.df = self.get_covariates(lead_target=lead_target)
 
         # filter afterwards (otherwise we would need to use a different threshold)
         self.raw_df = self.filter_df(
-            self.raw_df, start_date=start_date, end_date=end_date)
+            self.raw_df, start_date=self.start_date, end_date=self.end_date)
         self.df = self.filter_df(
-            self.df, start_date=start_date, end_date=end_date)
+            self.df, start_date=self.start_date, end_date=self.end_date)
 
         self.raw_df = self.train_split_data(self.raw_df)
         self.df = self.train_split_data(self.df)

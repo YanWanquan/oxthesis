@@ -5,7 +5,9 @@
 
 
 import argparse
+import enum
 import os
+import glob
 import dill
 import libs.utils as utils
 import pandas as pd
@@ -33,8 +35,10 @@ def get_args():
     # saved files ----
     parser.add_argument('--model_type', type=str, nargs='?', default='ml',
                         help="Choose the model type to run", choices=['tsmom', 'long', 'ml'])
-    parser.add_argument('--checkpoint_path', type=str, nargs='?',
+    parser.add_argument('--checkpoint_path', type=str, nargs='?', default=None,
                         help="Path to the runx checkpoint")
+    parser.add_argument('--checkpoint_dir', type=str, nargs='?', default=None,
+                        help="Directory to the expanding window checkpoints")
     parser.add_argument('--scaler_path', type=str, nargs='?', default=None,
                         help="TBD")
 
@@ -42,25 +46,50 @@ def get_args():
     parser.add_argument('--filename', type=str, nargs='?',
                         default="futures_prop.csv", help="Filename of corresponding .csv-file")
     parser.add_argument('--start_date', type=str, nargs='?',
-                        default=None, help="Start date")
+                        default='01-01-1990', help="Start date")
     parser.add_argument('--test_date', type=str, nargs='?',
-                        default=None, help="Test date")
+                        default='01-01-1990', help="Test date")
     parser.add_argument('--end_date', type=str, nargs='?',
-                        default=None, help="Last date")
+                        default='01-11-2020', help="Last date")
 
     args = parser.parse_args()
+    args.start_date = pd.to_datetime(args.start_date)
+    args.test_date = pd.to_datetime(args.test_date)
+    args.end_date = pd.to_datetime(args.end_date)
     return args
 
 
 def main():
     args = get_args()
 
+    if args.checkpoint_dir is not None:
+        print("> Expanding window")
+        checkpoints = glob.glob(args.checkpoint_dir + '/*.p')
+        for i, path in enumerate(checkpoints):
+            args.checkpoint_path = path
+            run_test_window(args)
+    elif args.checkpoint_path is not None:
+        print("> Single checkpoint")
+        run_test_window(args)
+    elif args.model_type in ['long', 'tsmom']:
+        print("> Simple strategy")
+        run_test_window(args)
+    else:
+        raise ValueError("Valid arguments missings")
+
+# --- --- ---
+# --- --- ---
+
+
+def run_test_window(args):
+    print(f"\n\nEvaluate checkpoint {args.checkpoint_path}")
+
     # (1) Load model
     if args.model_type not in ['tsmom', 'long']:
-        train_dict = torch.load(args.checkpoint_path)
+        train_dict = pickle.load(open(args.checkpoint_path, 'rb'))
         # need dill as we include lambda fcn
         arch = train_dict['arch']
-        model = dill.loads(train_dict['model'])
+        model = train_dict['model']
         train_manager = train_dict['train_manager']
 
         print(
@@ -109,9 +138,6 @@ def main():
     print("(3) Evaluate model")
     evaluate(model=model, data_iter=test_dataloader,
              base_df=base_loader.df[DataTypes.TEST], train_manager=train_manager)
-
-# --- --- ---
-# --- --- ---
 
 
 def evaluate(model, data_iter, base_df, train_manager):
@@ -284,12 +310,16 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
 
 
 def evaluate_tsmom(model, data, time_test, do_save=True):
-    str_rts = model.calc_strategy_returns(df=data)
+    str_pos, str_rts = model.calc_strategy_returns(df=data)
 
     if do_save:
-        file_path = utils.get_save_path(
-            file_label='rts', model=model.name, time_test=time_test)
-        str_rts.to_csv(file_path)
+        test_time = pd.to_datetime(time_test).year
+        pos_path = utils.get_save_path(
+            file_label='pos', model=model.name, setting=f"{model.name}__ty-{test_time}_", time_test=time_test)
+        rts_path = utils.get_save_path(
+            file_label='rts', model=model.name, setting=f"{model.name}__ty-{test_time}_", time_test=time_test)
+        str_pos.to_csv(pos_path)
+        str_rts.to_csv(rts_path)
 
     return str_rts
 

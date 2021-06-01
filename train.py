@@ -3,6 +3,7 @@
 # Sven Giegerich / 03.05.2021
 # --- --- ---
 
+from operator import mod
 import os
 import dill
 from datetime import datetime
@@ -78,6 +79,8 @@ def get_args():
                         default="01/01/1990", help="Start date")
     parser.add_argument('--test_date', type=str, nargs='?',
                         default="01/01/1995", help="Test date")
+    parser.add_argument('--test_win', type=int, nargs='?',
+                        default=None, help="If set, it runs a expanding window approach; expects the window length in years")
     parser.add_argument('--end_date', type=str, nargs='?',
                         default="01/01/2020", help="Last date")
     parser.add_argument('--scaler', type=str, nargs='?', choices=['none', 'minmax', 'standard'],
@@ -123,8 +126,48 @@ def get_args():
 
 def main():
     args = get_args()
-    if args.logdir is not None:
-        do_log = True
+
+    args.start_date = pd.to_datetime(args.start_date)
+    args.end_date = pd.to_datetime(args.end_date)
+
+    if args.test_win is not None:
+        print("> Start expanding window training")
+        args.test_date = pd.to_datetime(args.start_date)
+        args.stop_date = pd.to_datetime(args.end_date)
+        args.do_log = False  # runx works just for one model per experiment
+
+        test_loss = {}
+        while args.test_date < (args.stop_date - pd.offsets.DateOffset(years=args.test_win)):
+            args.test_date = pd.to_datetime(
+                args.test_date) + pd.offsets.DateOffset(years=args.test_win)
+            args.end_date = pd.to_datetime(
+                args.test_date) + pd.offsets.DateOffset(years=args.test_win)
+
+            if args.end_date > pd.to_datetime('01-01-2016'):
+                args.end_date = pd.to_datetime('01-01-2021')
+
+            test_loss[args.test_date], setting = run_training_window(args)
+
+        test_mean = np.mean(list(test_loss.values()))
+        pd.Series(test_loss, name=setting).to_csv(args.logdir +
+                                                  f"/exp_win_test_loss_m-{test_mean}.csv")
+        print("> Finished expanding window training")
+    elif args.test_date is not None:
+        print("> Start single window training")
+        args.do_log = True
+
+        test_loss, setting = run_training_window(args)
+    else:
+        raise ValueError("Either test_win_len or test_date needs to be set!")
+
+# --- --- ---
+# --- --- ---
+
+
+def run_training_window(args):
+    print(f"\n\n> Train with test date {args.test_date}")
+
+    if args.logdir is not None and args.do_log:
         logx.initialize(logdir=args.logdir, coolname=True,
                         tensorboard=True, hparams=vars(args))
 
@@ -145,12 +188,16 @@ def main():
                                     args.start_date, args.test_date)
     dataset_val = FuturesDataset(
         base_loader, DataTypes.VAL, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
+    dataset_test = FuturesDataset(
+        base_loader, DataTypes.TEST, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
     train_dataloader = DataLoader(
         dataset_train, batch_size=train_batch_size, shuffle=True)
+    test_dataloader = DataLoader(
+        dataset_test, batch_size=test_batch_size, shuffle=True)
     val_dataloader = DataLoader(
         dataset_val, batch_size=val_batch_size, shuffle=False)
 
-    if do_log:
+    if args.do_log:
         logx.msg(
             f"> Train sample size: {len(train_dataloader) * train_batch_size}")
 
@@ -245,7 +292,7 @@ def main():
     train_manager['setting'] = '{}_{}_ty-{}_wl-{}_ws-{}_nl-{}_dh-{}'.format(args.arch, args.loss_type, pd.to_datetime(
         args.test_date).year, args.win_len, args.step, args.n_layer, args.d_hidden)
 
-    if do_log:
+    if args.do_log:
         if model.name in ['transformer', 'conv_transformer', 'informer']:
             train_manager['setting'] = train_manager['setting'] + \
                 '_nh-{}'.format(args.n_head,)
@@ -255,12 +302,15 @@ def main():
         logx.msg(f"Setting: {train_manager['setting']}")
 
     train(model=model, train_iter=train_dataloader,
-          val_iter=val_dataloader, train_manager=train_manager, do_log=do_log)
+          val_iter=val_dataloader, train_manager=train_manager, do_log=args.do_log)
 
-    print("(5) Finished training")
+    # (5) test model ----
+    test_loss = evaluate_test(model=model, train_iter=test_dataloader,
+                              train_manager=train_manager, do_log=False).cpu().numpy()
+    print(f">> Test loss: {test_loss}")
 
-# --- --- ---
-# --- --- ---
+    print("(6) Finished training")
+    return (test_loss, train_manager['setting'])
 
 
 def train(model, train_iter, val_iter, train_manager, do_log=False):
@@ -270,8 +320,14 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
     # train manager ----
     train_manager['optimizer'] = torch.optim.AdamW(
         model.parameters(), lr=train_manager['lr'])
+
+    if do_log:
+        stopping_path = None
+    else:
+        stopping_path = train_manager['args']['logdir'] + "/" + \
+            train_manager['setting'] + '.p'
     early_stopping = EarlyStopping(
-        patience=train_manager['patience'], path=None, verbose=True)
+        patience=train_manager['patience'], path=stopping_path, verbose=True)
 
     # run training ----
     for epoch_i in range(train_manager['epochs']):
@@ -299,17 +355,21 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
             print(epoch_print)
 
         # save ----
+        save_dict = {'epoch': epoch_i + 1,
+                     'arch': model.name,
+                     'train_manager': train_manager,
+                     'model': model,
+                     'optimizer': train_manager['optimizer'].state_dict()}
         if do_log:
-            save_dict = {'epoch': epoch_i + 1,
-                         'arch': model.name,
-                         'train_manager': train_manager,
-                         'model': dill.dumps(model),
-                         'optimizer': train_manager['optimizer'].state_dict()}
             logx.save_model(save_dict, metric=val_loss,
                             epoch=epoch_i + 1, higher_better=False)
 
         # early stopping ----
         early_stopping(val_loss, model)
+
+        if early_stopping.do_save_model:
+            early_stopping.save_checkpoint(
+                val_loss=val_loss, dict=save_dict)
         if early_stopping.early_stop:
             print(f"> Early stopping")
             break
@@ -371,6 +431,10 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
 
 def evaluate_validation(model, val_iter, train_manager, do_log=False):
     return evaluate_model(model, val_iter, train_manager, do_log=do_log)
+
+
+def evaluate_test(model, train_iter, train_manager, do_log=False):
+    return evaluate_model(model, train_iter, train_manager, do_log=do_log)
 
 # --- --- ---
 # --- --- ---

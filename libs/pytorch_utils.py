@@ -4,7 +4,7 @@
 # --- --- ---
 
 import numpy as np
-import torch
+import pickle
 
 
 # See: https://github.com/Bjarten/early-stopping-pytorch/blob/master/pytorchtools.py
@@ -30,6 +30,7 @@ class EarlyStopping:
         self.counter = 0
         self.best_score = None
         self.early_stop = False
+        self.do_save_model = False
         self.val_loss_min = np.Inf
         self.delta = delta
         self.path = path
@@ -40,31 +41,27 @@ class EarlyStopping:
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.do_save_model = True
         elif score < self.best_score + self.delta:
             self.counter += 1
+            self.do_save_model = False
             self.trace_func(
                 f'EarlyStopping counter: {self.counter} out of {self.patience}')
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.do_save_model = True
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
+    def save_checkpoint(self, val_loss, dict):
         '''Saves model when validation loss decrease.'''
         # SVEN
+        # save dict via pickle instead of a model
         # only if path is given else the logx is used
         if self.path is not None:
             if self.verbose:
                 self.trace_func(
-                    f'>> 0Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-            torch.save(model, self.path)
+                    f'>> Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
+            pickle.dump(dict, open(self.path, 'wb'))
             self.val_loss_min = val_loss
-
-
-class NetworkTrainer():
-
-    def __init__():
-        pass
