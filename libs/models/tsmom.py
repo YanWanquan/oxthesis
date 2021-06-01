@@ -23,7 +23,7 @@ class MomentumInterface(ABC):
 
     def calc_strategy_returns(self, df):
         prices = df.xs('prs', axis=1, level=1, drop_level=True)
-        scaled_rts = df.xs('rts_scaled', axis=1, level=1, drop_level=True)
+        scaled_rts = df.xs('rts_scaled_lead', axis=1, level=1, drop_level=True)
 
         signals = self.calc_signal(prices)
         positions = self.calc_position(signals)

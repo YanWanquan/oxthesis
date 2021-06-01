@@ -132,21 +132,24 @@ def main():
 
     if args.test_win is not None:
         print("> Start expanding window training")
-        args.test_date = pd.to_datetime(args.start_date)
+        args.test_date = pd.to_datetime(
+            args.start_date) + pd.offsets.DateOffset(years=args.test_win)
         args.stop_date = pd.to_datetime(args.end_date)
+        args.end_date = pd.to_datetime(
+            args.test_date) + pd.offsets.DateOffset(years=args.test_win)
         args.do_log = False  # runx works just for one model per experiment
 
         test_loss = {}
-        while args.test_date < (args.stop_date - pd.offsets.DateOffset(years=args.test_win)):
+        while args.test_date < args.stop_date:
+            test_loss[args.test_date], setting = run_training_window(args)
+
             args.test_date = pd.to_datetime(
                 args.test_date) + pd.offsets.DateOffset(years=args.test_win)
             args.end_date = pd.to_datetime(
                 args.test_date) + pd.offsets.DateOffset(years=args.test_win)
-
+            # otherwise just one year would be to few
             if args.end_date > pd.to_datetime('01-01-2016'):
                 args.end_date = pd.to_datetime('01-01-2021')
-
-            test_loss[args.test_date], setting = run_training_window(args)
 
         test_mean = np.mean(list(test_loss.values()))
         pd.Series(test_loss, name=setting).to_csv(args.logdir +
@@ -289,16 +292,15 @@ def run_training_window(args):
     # (4) train model ----
     print("(4) Start training")
 
-    train_manager['setting'] = '{}_{}_ty-{}_wl-{}_ws-{}_nl-{}_dh-{}'.format(args.arch, args.loss_type, pd.to_datetime(
-        args.test_date).year, args.win_len, args.step, args.n_layer, args.d_hidden)
-
+    train_manager['setting'] = '{}_{}_ty-{}_wl-{}_ws-{}_nl-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
+        args.test_date).year, args.win_len, args.step, args.n_layer, args.d_hidden, args.dropout)
+    if model.name in ['transformer', 'conv_transformer', 'informer']:
+        train_manager['setting'] = train_manager['setting'] + \
+            '_nh-{}'.format(args.n_head,)
+    if model.name == 'conv_transformer':
+        train_manager['setting'] = train_manager['setting'] + \
+            '_ql-{}'.format(args_conv_transf['q_len'])
     if args.do_log:
-        if model.name in ['transformer', 'conv_transformer', 'informer']:
-            train_manager['setting'] = train_manager['setting'] + \
-                '_nh-{}'.format(args.n_head,)
-        if model.name == 'conv_transformer':
-            train_manager['setting'] = train_manager['setting'] + \
-                '_ql-{}'.format(args_conv_transf['q_len'])
         logx.msg(f"Setting: {train_manager['setting']}")
 
     train(model=model, train_iter=train_dataloader,

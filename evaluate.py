@@ -105,7 +105,10 @@ def run_test_window(args):
         train_manager = {
             'args': {
                 'filename': args.filename,
-                'lead_target': 1
+                'lead_target': 1,
+                'start_date': args.start_date,
+                'test_date': args.test_date,
+                'end_date': args.end_date
             }
         }
 
@@ -144,7 +147,6 @@ def evaluate(model, data_iter, base_df, train_manager):
         returns = evaluate_tsmom(
             model=model, data=base_df, time_test=train_manager['args']['test_date'])
         agg_total_returns = calc_total_returns(returns, aggregate_by='time')
-        plot_total_returns(agg_total_returns)
         return 1
 
     # --- ---

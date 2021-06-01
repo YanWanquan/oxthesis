@@ -133,12 +133,12 @@ class BaseDataLoader:
         # total returns and vol
         covariates_dict['trs'] = self.get_total_returns(
             df=covariates_dict['prs'], vol_scaling=True)
-        rts = utils.calc_returns_df(
+        covariates_dict['rts'] = utils.calc_returns_df(
             covariates_dict['prs'], offset=1, drop_na=False)
         covariates_dict['rts_scaled'] = covariates_dict['trs'] / \
             covariates_dict['trs'].shift(1) - 1
         covariates_dict['vol_norm'] = self.get_vol_normalizer(
-            df=rts, vol_target=vol_target, vol_lookback=vol_lookback)
+            df=covariates_dict['rts'], vol_target=vol_target, vol_lookback=vol_lookback)
         covariates_dict['vol'] = 1.0 / covariates_dict['vol_norm']
 
         covariates_dict['vol_raw'] = utils.calc_volatility_df(
@@ -159,8 +159,10 @@ class BaseDataLoader:
                 prices=covariates_dict['prs'], short_win=short_win, long_win=long_win)
 
         # target returns: label as last column
+        covariates_dict['rts_lead'] = covariates_dict['rts'].shift(
+            -lead_target)
         covariates_dict['rts_scaled_lead'] = covariates_dict['rts_scaled'].shift(
-            -lead_target)  # for loss
+            -lead_target)
         covariates_dict['trg'] = covariates_dict['rts_scaled'].shift(
             -lead_target)
 
