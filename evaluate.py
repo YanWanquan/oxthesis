@@ -109,10 +109,6 @@ def run_test_window(args):
             }
         }
 
-    train_manager['args']['start_date'] = train_manager['args']['start_date'] if args.start_date is None else args.start_date
-    train_manager['args']['end_date'] = train_manager['args']['end_date'] if args.end_date is None else args.end_date
-    train_manager['args']['test_date'] = train_manager['args']['test_date'] if args.test_date is None else args.test_date
-
     base_loader = BaseDataLoader(
         filename=train_manager['args']['filename'], index_col=index_col,
         start_date=train_manager['args']['start_date'], end_date=train_manager['args']['end_date'],

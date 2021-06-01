@@ -399,11 +399,8 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             prediction = model(inputs)
 
         if LossHelper.use_returns_for_loss(train_manager['loss_type']):
-            if train_manager['loss_type'] == LossTypes.SHARPE:
-                loss = loss_fn(prediction, returns,
-                               freq=train_manager['frequency'])
-            else:
-                loss = loss_fn(prediction, returns)
+            loss = loss_fn(prediction, returns,
+                           freq=train_manager['frequency'])
         else:
             loss = loss_fn(prediction, labels)
 
