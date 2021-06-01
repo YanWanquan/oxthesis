@@ -83,7 +83,7 @@ def get_args():
                         default=None, help="If set, it runs a expanding window approach; expects the window length in years")
     parser.add_argument('--end_date', type=str, nargs='?',
                         default="01/01/2020", help="Last date")
-    parser.add_argument('--scaler', type=str, nargs='?', choices=['none', 'minmax', 'standard'],
+    parser.add_argument('--scaler', type=str, nargs='?', choices=[None, 'minmax', 'standard'],
                         default="standard", help="Sklearn scaler to use")
     # window ----
     parser.add_argument('--lead_target', type=int, nargs='?',
@@ -340,7 +340,7 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
             best_val_score = val_loss
 
         # verb ----
-        epoch_print = f">> Train Epoch {epoch_i + 1}\tval loss: {val_loss}\t train loss: {epoch_loss}"
+        epoch_print = f">> Train Epoch {epoch_i + 1}\t val loss: {val_loss}\t train loss: {epoch_loss}"
         if do_log:
             logx.msg(epoch_print)
             logx.add_scalar("Loss/val", val_loss, epoch_i)
@@ -360,9 +360,9 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
                      'train_manager': train_manager,
                      'model': model,
                      'optimizer': train_manager['optimizer'].state_dict()}
-        if do_log:
-            logx.save_model(save_dict, metric=val_loss,
-                            epoch=epoch_i + 1, higher_better=False)
+        # if do_log:
+        #    logx.save_model(save_dict, metric=val_loss,
+        #                    epoch=epoch_i + 1, higher_better=False)
 
         # early stopping ----
         early_stopping(val_loss, model)
@@ -415,12 +415,12 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         optimizer.step()
 
         # log results
-        if epoch_i is not None and i % 200 == 0:
+        if epoch_i is not None and i % 5 == 0:
             if do_log:
                 writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
                 logx.add_scalar(writer_path, loss, epoch_i *
                                 len(train_iter) + i)
-            print_msg = f">> Train Epoch {epoch_i}\tbatch {i}\ttrain loss: {loss}"
+            print_msg = f">> Train Epoch {epoch_i}\t batch {i}\t train loss: {loss}"
             if do_log:
                 logx.msg(print_msg)
             else:

@@ -14,8 +14,17 @@ class LossTypes(IntEnum):
     MSE = 3
 
 
-def calc_loss_avg_returns(pred_position, returns_scaled):
-    return -torch.mean(calc_captured_return(pred_position, returns_scaled))
+def calc_loss_avg_returns(pred_position, returns_scaled, freq='d'):
+
+    if freq == 'd':
+        scale_factor = 252
+    else:
+        return ValueError("Other frequencies in the loss function currently not supported.")
+
+    avg_returns = torch.mean(
+        calc_captured_return(pred_position, returns_scaled))
+
+    return -avg_returns * scale_factor
 
 
 def calc_loss_sharpe(pred_position, returns_scaled, freq='d'):
