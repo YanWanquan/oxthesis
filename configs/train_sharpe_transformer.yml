@@ -10,43 +10,27 @@ HPARAMS: [
     # data
     filename: ['futures_prop.csv'],
     start_date: ['01/01/1990'],
+    test_win: 5,
     test_date: ['01/01/1995'],
     end_date: ['17/10/2020'],
     # window
     win_len: [63],
-    step: [5],
+    step: [10],
     # training
     epochs: [100],
-    lr: [0.0001],
-    batch_size: [128],
-    dropout: [0.1],
-    patience: 10,
+    lr: [0.00001, 0.0001, 0.001, 0.01],
+    batch_size: [128, 256, 512],
+    patience: 25,
     # --- ---
     # all params above are inherited in the next runs
     # --- ---
     # architecture specific
-    RUNX.TAG: 'transformer_1995',
+    RUNX.TAG: 'transformer',
     arch: 'transformer',
     # model hyperparams
     d_model: [60],
     n_head: [12],
-    n_layer: [1],
-    d_hidden_factor: [2], # replace with a factor
-  }, 
-  {
-    RUNX.TAG: 'transformer_2010',
-    test_date: ['01/01/2010'],
-  },
-  {
-    RUNX.TAG: 'transformer_2005',
-    test_date: ['01/01/2005'],
-  },
-  {
-    RUNX.TAG: 'transformer_2000',
-    test_date: ['01/01/2000'],
-  },
-  {
-    RUNX.TAG: 'transformer_2015',
-    test_date: ['01/01/2015'],
+    n_layer: [1, 2],
+    d_hidden_factor: [2, 4], # replace with a factor
   }
 ]
