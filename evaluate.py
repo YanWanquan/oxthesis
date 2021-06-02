@@ -225,7 +225,7 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
 
             total_val_loss += loss
 
-    return total_val_loss / (len(data_iter) - 1)
+    return total_val_loss / len(data_iter)
 
 
 def calc_position_df(prediction, loss_type):

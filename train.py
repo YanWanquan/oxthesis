@@ -6,7 +6,7 @@
 from operator import mod
 import os
 import dill
-from datetime import datetime
+from datetime import datetime, timedelta
 from sys import platform
 import argparse
 import torch
@@ -82,7 +82,7 @@ def get_args():
     parser.add_argument('--test_win', type=int, nargs='?',
                         default=None, help="If set, it runs a expanding window approach; expects the window length in years")
     parser.add_argument('--end_date', type=str, nargs='?',
-                        default="01/01/2020", help="Last date")
+                        default="10/01/2020", help="Last date")
     parser.add_argument('--scaler', type=str, nargs='?', choices=[None, 'minmax', 'standard'],
                         default="standard", help="Sklearn scaler to use")
     # window ----
@@ -140,21 +140,24 @@ def main():
         args.do_log = False  # runx works just for one model per experiment
 
         test_loss = {}
+        wins_len = []
         while args.test_date < args.stop_date:
             test_loss[args.test_date], setting = run_training_window(args)
+            wins_len.append((args.end_date - args.test_date) /
+                            timedelta(days=365))
 
             args.test_date = pd.to_datetime(
                 args.test_date) + pd.offsets.DateOffset(years=args.test_win)
             args.end_date = pd.to_datetime(
                 args.test_date) + pd.offsets.DateOffset(years=args.test_win)
-            # otherwise just one year would be to few
-            if args.end_date > pd.to_datetime('01-01-2016'):
-                args.end_date = pd.to_datetime('01-01-2021')
+            if args.end_date > args.stop_date:
+                args.end_date = args.stop_date
 
-        test_mean = np.mean(list(test_loss.values()))
+        test_mean = np.average(list(test_loss.values()), weights=wins_len)
         pd.Series(test_loss, name=setting).to_csv(args.logdir +
                                                   f"/exp_win_test_loss_m-{test_mean}.csv")
-        print("> Finished expanding window training")
+        print(
+            f"> Finished expanding window training \t mean test loss: {test_mean}")
     elif args.test_date is not None:
         print("> Start single window training")
         args.do_log = True
@@ -202,7 +205,10 @@ def run_training_window(args):
 
     if args.do_log:
         logx.msg(
-            f"> Train sample size: {len(train_dataloader) * train_batch_size}")
+            f"> Train sample size: {len(train_dataloader) * train_batch_size} \t train sample size: {len(test_dataloader) * test_batch_size}")
+    else:
+        print(
+            f"> Train sample size: {len(train_dataloader) * train_batch_size} \t train sample size: {len(test_dataloader) * test_batch_size}")
 
     # (2) define training meta-data
     print("(2) Setup training manager")
@@ -305,6 +311,7 @@ def run_training_window(args):
 
     train(model=model, train_iter=train_dataloader,
           val_iter=val_dataloader, train_manager=train_manager, do_log=args.do_log)
+    print("--- --- ---")
 
     # (5) test model ----
     test_loss = evaluate_test(model=model, train_iter=test_dataloader,
@@ -342,7 +349,7 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
             best_val_score = val_loss
 
         # verb ----
-        epoch_print = f">> Train Epoch {epoch_i + 1}\t val loss: {val_loss}\t train loss: {epoch_loss}"
+        epoch_print = f">> Train Epoch {epoch_i + 1}\t --- ---\t train loss: {epoch_loss}\t val loss: {val_loss}"
         if do_log:
             logx.msg(epoch_print)
             logx.add_scalar("Loss/val", val_loss, epoch_i)
@@ -382,6 +389,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
     optimizer = train_manager['optimizer']
     loss_fn = train_manager['loss_fn']
 
+    loss_epoch = 0.
     for i, batch in enumerate(train_iter):
         optimizer.zero_grad()
 
@@ -414,6 +422,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         optimizer.step()
 
         # log results
+        loss_epoch += loss
         if epoch_i is not None and i % 5 == 0:
             if do_log:
                 writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
@@ -425,7 +434,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             else:
                 print(print_msg)
 
-    return loss
+    return loss_epoch / (len(train_iter) - 1)
 
 
 def evaluate_validation(model, val_iter, train_manager, do_log=False):
