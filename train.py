@@ -83,7 +83,7 @@ def get_args():
                         default=None, help="If set, it runs a expanding window approach; expects the window length in years")
     parser.add_argument('--end_date', type=str, nargs='?',
                         default="10/01/2020", help="Last date")
-    parser.add_argument('--scaler', type=str, nargs='?', choices=[None, 'minmax', 'standard'],
+    parser.add_argument('--scaler', type=str, nargs='?', choices=['none', 'minmax', 'standard'],
                         default="standard", help="Sklearn scaler to use")
     # window ----
     parser.add_argument('--lead_target', type=int, nargs='?',
