@@ -20,7 +20,7 @@ HPARAMS: [
     lr: [0.001],
     max_grad_norm: [1, 0.1, 0.01, 0.001],
     dropout: [0.1],
-    batch_size: [64],
+    batch_size: [254],
     # --- ---
     # all params above are inherited in the next runs
     # --- ---
