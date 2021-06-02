@@ -5,7 +5,7 @@ HPARAMS: [
     # runx
     logdir: LOGDIR,
     # main
-    loss_type: 'avg-returns',
+    loss_type: 'sharpe',
     scaler: 'none',
     # data
     filename: ['futures_prop.csv'],
@@ -14,13 +14,14 @@ HPARAMS: [
     test_date: ['01/01/2015'],
     # window
     win_len: [60],
-    step: [1],
+    step: [10],
     # training
-    epochs: [50],
+    epochs: 200,
+    patience: 25,
     lr: [0.001],
-    max_grad_norm: [1, 0.1, 0.01, 0.001],
-    dropout: [0.1],
-    batch_size: [254],
+    max_grad_norm: [0.3],
+    dropout: [0, 0.1, 0.3],
+    batch_size: [64],
     # --- ---
     # all params above are inherited in the next runs
     # --- ---
