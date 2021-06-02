@@ -30,8 +30,7 @@ def main():
     dfs = []
     for i, path in enumerate(files):
         df_i = pd.read_csv(path, index_col=0)
-        df_i.columns = [path.split('/')[-2] + '_' + df_i.columns[0]]
-        print(path.split('/')[-2])
+        df_i.columns = [path.split('/')[-2] + '__||__' + df_i.columns[0]]
         dfs.append(df_i)
     df = reduce(lambda left, right: pd.merge(left, right, left_index=True, right_index=True,
                                              how='outer'), dfs)
