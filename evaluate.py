@@ -165,7 +165,8 @@ def evaluate(model, data_iter, base_df, train_manager):
                                       win_step=train_manager['args']['win_len'], scaler=train_manager['scaler'], loss_type=train_manager['loss_type'])
     positions = calc_position_df(predictions, train_manager['loss_type'])
 
-    scaled_rts = base_df.xs('rts_scaled', axis=1, level=1, drop_level=True)
+    scaled_rts = base_df.xs('rts_scaled_lead', axis=1,
+                            level=1, drop_level=True)
     str_returns = utils.calc_strategy_returns(
         positions=positions, realized_returns=scaled_rts)
 
@@ -215,11 +216,8 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
                 prediction = model(inputs)
 
             if LossHelper.use_returns_for_loss(train_manager['loss_type']):
-                if train_manager['loss_type'] == LossTypes.SHARPE:
-                    loss = loss_fn(prediction, returns,
-                                   freq=train_manager['frequency'])
-                else:
-                    loss = loss_fn(prediction, returns)
+                loss = loss_fn(prediction, returns,
+                               freq=train_manager['frequency'])
             else:
                 loss = loss_fn(prediction, labels)
 
