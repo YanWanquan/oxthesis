@@ -299,7 +299,7 @@ def run_training_window(args):
     print("(4) Start training")
 
     train_manager['setting'] = '{}_{}_ty-{}_bs-{}_lr-{}_pa-{}_wl-{}_ws-{}_nl-{}_dm-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
-        args.test_date).year, args.batch_size, args.learning_rate, args.patience, args.win_len, args.step, args.n_layer, args.d_model, args.d_hidden, args.dropout)
+        args.test_date).year, args.batch_size, args.lr, args.patience, args.win_len, args.step, args.n_layer, args.d_model, args.d_hidden, args.dropout)
     if model.name in ['transformer', 'conv_transformer', 'informer']:
         train_manager['setting'] = train_manager['setting'] + \
             '_nh-{}'.format(args.n_head,)
