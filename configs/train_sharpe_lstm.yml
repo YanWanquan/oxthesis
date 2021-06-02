@@ -25,7 +25,6 @@ HPARAMS: [
     # all params above are inherited in the next runs
     # --- ---
     # architecture specific
-    RUNX.TAG: 'lstm',
     arch: 'lstm',
     # model hyperparams
     n_layer: 1,

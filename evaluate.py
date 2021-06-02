@@ -187,9 +187,9 @@ def evaluate(model, data_iter, base_df, train_manager):
         f">> Total strategy return from {agg_str_total_returns.index[0]} to {agg_str_total_returns.last_valid_index()}: {agg_str_total_returns[agg_str_total_returns.last_valid_index()]}")
 
     # plot ----
-    trs_plot_path = utils.get_save_path(
-        file_label='plot', model=model.name, setting=train_manager['setting'], time_test=train_manager['args']['test_date'], file_type='pdf')
-    plot_total_returns(agg_str_total_returns, path=trs_plot_path)
+    # trs_plot_path = utils.get_save_path(
+    #    file_label='plot', model=model.name, setting=train_manager['setting'], time_test=train_manager['args']['test_date'], file_type='pdf')
+    # plot_total_returns(agg_str_total_returns, path=trs_plot_path)
 
     return 1
 
