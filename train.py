@@ -176,8 +176,13 @@ def run_training_window(args):
     print(f"\n\n> Train with test date {args.test_date}")
 
     if args.logdir is not None and args.do_log:
+        args_log = args  # runx cann't deal with pd.DateTime objects
+        args_log.start_date = str(args_log.start_date)
+        args_log.test_date = str(args_log.test_date)
+        args_log.end_date = str(args_log.end_date)
+        args_log.stop_date = str(args_log.stop_date)
         logx.initialize(logdir=args.logdir, coolname=True,
-                        tensorboard=True, hparams=vars(args))
+                        tensorboard=True, hparams=vars(args_log))
 
     # (1) load data ----
     print("(1) Load data")
