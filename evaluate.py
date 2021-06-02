@@ -199,6 +199,7 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
     loss_fn = train_manager['loss_fn']
     total_val_loss = 0.
 
+    model.eval()
     with torch.no_grad():
         for i, batch in enumerate(data_iter):
             inputs = batch['inp'].double().to(device)

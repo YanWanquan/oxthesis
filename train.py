@@ -304,8 +304,8 @@ def run_training_window(args):
     # (4) train model ----
     print("(4) Start training")
 
-    train_manager['setting'] = '{}_{}_ty-{}_bs-{}_lr-{}_pa-{}_wl-{}_ws-{}_nl-{}_dm-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
-        args.test_date).year, args.batch_size, args.lr, args.patience, args.win_len, args.step, args.n_layer, args.d_model, args.d_hidden, args.dropout)
+    train_manager['setting'] = '{}_{}_ty-{}_bs-{}_lr-{}_pa-{}_gn-{}_wl-{}_ws-{}_nl-{}_dm-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
+        args.test_date).year, args.batch_size, args.lr, args.patience, args.max_grad_norm, args.win_len, args.step, args.n_layer, args.d_model, args.d_hidden, args.dropout)
     if model.name in ['transformer', 'conv_transformer', 'informer']:
         train_manager['setting'] = train_manager['setting'] + \
             '_nh-{}'.format(args.n_head,)
@@ -333,7 +333,7 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
     best_val_score = np.inf
 
     # train manager ----
-    train_manager['optimizer'] = torch.optim.AdamW(
+    train_manager['optimizer'] = torch.optim.Adam(
         model.parameters(), lr=train_manager['lr'])
 
     if do_log:
