@@ -6,7 +6,7 @@ HPARAMS: [
     logdir: LOGDIR,
     # main
     loss_type: 'avg-returns',
-    scaler: 'none',
+    scaler: None,
     # data
     filename: ['futures_prop.csv'],
     start_date: ['01/01/1990'],
