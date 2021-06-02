@@ -5,30 +5,29 @@ HPARAMS: [
     # runx
     logdir: LOGDIR,
     # main
-    loss_type: ['mse'],
+    loss_type: 'avg-returns',
+    scaler: 'none',
     # data
     filename: ['futures_prop.csv'],
     start_date: ['01/01/1990'],
     end_date: ['01/01/2020'],
-    test_date: ['01/01/1995'],
+    test_date: ['01/01/2015'],
     # window
     win_len: [60],
-    step: [20],
+    step: [1],
     # training
-    epochs: [2],
-    lr: [0.001, 0.1],
+    epochs: [50],
+    lr: [0.001],
+    max_grad_norm: [1, 0.1, 0.01, 0.001],
     dropout: [0.1],
     batch_size: [64],
     # --- ---
     # all params above are inherited in the next runs
     # --- ---
     # architecture specific
-    RUNX.TAG: 'informer',
-    arch: 'informer',
+    arch: 'lstm',
     # model hyperparams
-    d_model: [60],
-    n_head: [6],
-    n_layer: [1],
-    d_hidden_factor: [2], # replace with a factor
+    d_model: [20],
+    n_layer: [1]
   }
 ]

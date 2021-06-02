@@ -119,7 +119,7 @@ class BaseDataLoader:
     def get_covariates(self, lead_target):
         smooth_window = 252
         missingness_threshold = 0.1
-        vol_target = 0.4
+        vol_target = 0.15
         vol_lookback = 60
         drop_na = False
 
@@ -209,7 +209,7 @@ class BaseDataLoader:
 
         return prs
 
-    def get_total_returns(self, vol_scaling, df=None, vol_target=0.4, vol_lookback=60):
+    def get_total_returns(self, vol_scaling, df=None, vol_target=0.15, vol_lookback=60):
         """
         Args
             prs (pd.DataFrame): cleaned dataframe (dim: T x instruments)

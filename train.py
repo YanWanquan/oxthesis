@@ -101,6 +101,8 @@ def get_args():
                         default=0.001, help="Learning rate")
     parser.add_argument('--batch_size', type=int, nargs='?',
                         default=128, help="Batch size for training")
+    parser.add_argument('--max_grad_norm', type=float, nargs='?',
+                        default=0.1, help="Max gradient norm for clipping")
     parser.add_argument('--dropout', type=float, nargs='?',
                         default=0.1, help="Dropout rate applied to all layers of an arch")
     # model specific params
@@ -388,6 +390,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
     model.train()
     optimizer = train_manager['optimizer']
     loss_fn = train_manager['loss_fn']
+    max_grad_norm = train_manager['args']['max_grad_norm']
 
     loss_epoch = 0.
     for i, batch in enumerate(train_iter):
@@ -418,7 +421,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
 
         # clip gradients
         torch.nn.utils.clip_grad_norm_(
-            model.parameters(), .7)  # also seen .5 elsewhere
+            model.parameters(), max_norm=max_grad_norm)
         optimizer.step()
 
         # log results

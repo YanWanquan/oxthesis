@@ -165,13 +165,13 @@ def evaluate(model, data_iter, base_df, train_manager):
                                       win_step=train_manager['args']['win_len'], scaler=train_manager['scaler'], loss_type=train_manager['loss_type'])
     positions = calc_position_df(predictions, train_manager['loss_type'])
 
-    scaled_rts = base_df.xs('rts_scaled_lead', axis=1,
+    scaled_rts = base_df.xs('rts_scaled', axis=1,
                             level=1, drop_level=True)
     str_returns = utils.calc_strategy_returns(
         positions=positions, realized_returns=scaled_rts)
 
     # save ----
-    scaled_rts.to_csv("scaled_rts.csv")
+    # scaled_rts_lead.to_csv("scaled_rts_lead.csv")
     predictions_file_path = utils.get_save_path(
         file_label='pred', model=model.name, setting=train_manager['setting'], time_test=train_manager['args']['test_date'], file_type='csv')
     predictions.to_csv(predictions_file_path)

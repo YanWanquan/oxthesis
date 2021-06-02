@@ -107,15 +107,15 @@ def order_set(seq):
     return [x for x in seq if not (x in seen or seen_add(x))]
 
 
-def calc_strategy_returns(positions, realized_returns, aggregate_by=None):
+def calc_strategy_returns(positions, realized_returns, aggregate_by=None, lead=1):
     """Calculates the returns of a strategy across time and instruments
 
     Args:
         positions (pd.DataFrame): (dim: T x instruments)
-        realized_returns (pd.DataFrame) (dim: same)
+        realized_returns (pd.DataFrame): (dim: same)
         aggregate_by (str)
     """
-    str_rts = positions * realized_returns
+    str_rts = positions * realized_returns.shift(-lead)
 
     if aggregate_by == 'instrument':
         return str_rts.mean(axis=0)
