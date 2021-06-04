@@ -51,7 +51,7 @@ class FuturesDataset(Dataset):
         data_scal, self.scaler = self.do_scale_df(
             dataloader.df, scaler_type=self.scaler_type, scaler=scaler)
         self.data, self.time_id, self.inst_index, self.time_embd = self.make_dataset(
-            data_scal[self.dat_type], win_size=win_size, step=step, dim=0, freq=freq)
+            data_scal[self.dat_type], win_size=win_size, step=step, slice_dim=0, freq=freq)
 
         # lookups
         self.cov_lookup = {label: i for i, label in enumerate(
@@ -65,7 +65,7 @@ class FuturesDataset(Dataset):
         self.prs_indexes = [
             i for k, i in self.cov_lookup.items() if k in self.PRS_COLS]
 
-    def make_dataset(self, df, win_size, step, dim=0, filter_na=True, freq='d'):
+    def make_dataset(self, df, win_size, step, slice_dim=0, filter_na=True, freq='d'):
         dat_inst_list = []
         time_ids_list = []
         inst_index_lookup = []
@@ -76,7 +76,7 @@ class FuturesDataset(Dataset):
         for instrument, df_inst in df.groupby(level=0, axis=1):
             ten_inst = torch.from_numpy(df_inst.to_numpy())
             df_inst_win = self.slice_torch(
-                ten=ten_inst, win_size=win_size, step=step, dim=dim)
+                ten=ten_inst, win_size=win_size, step=step, dim=slice_dim)
             dat_inst_list.append(df_inst_win)
 
             # attributes lookups (timestamp, instrument) ----
@@ -111,15 +111,15 @@ class FuturesDataset(Dataset):
         return data, time_ids, inst_index, time_embedding
 
     def do_scale_df(self, df, scaler_type=None, scaler=None):
+        if scaler_type is None or scaler_type == 'none':
+            print("> No additional scaling used")
+            return df, None
+
         if scaler is not None:
             print("> Use fitted scaler")
             scaler_inp = scaler['inp']
             scaler_trg = scaler['trg']
         else:
-            if scaler_type is None or scaler_type == 'none':
-                print("> No scaling used")
-                return df, None
-
             # stack data for scaler
             df_train_stack = df[DataTypes.TRAIN].stack(level=0)
 

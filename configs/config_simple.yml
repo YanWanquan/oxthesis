@@ -10,8 +10,8 @@ HPARAMS: [
     # data
     filename: ['futures_prop.csv'],
     start_date: ['01/01/1990'],
-    end_date: ['01/01/2020'],
-    test_date: ['01/01/2015'],
+    end_date: ['01/01/2010'],
+    test_date: ['01/01/2005'],
     # window
     win_len: [60],
     step: [10],
@@ -20,7 +20,7 @@ HPARAMS: [
     patience: 25,
     lr: [0.001],
     max_grad_norm: [0.3],
-    dropout: [0, 0.1, 0.3],
+    dropout: [0],
     batch_size: [64],
     # --- ---
     # all params above are inherited in the next runs

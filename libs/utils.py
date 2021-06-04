@@ -162,9 +162,12 @@ def save_scaler(scaler, filename, start_date, test_date):
 
 
 # Currently not used
-def load_scaler(filename, start_date, test_date):
-    path = get_scaler_path(filename, start_date, test_date)
-    return pickle.load(open(path, 'rb'))
+def load_scaler(scaler_path):
+    if isinstance(scaler_path, str):
+        return pickle.load(open(scaler_path, 'rb'))
+    else:
+        print("> No scaler loaded")
+        return "none"
 
 
 def inverse_scale_tensor(df, scaler_dict):

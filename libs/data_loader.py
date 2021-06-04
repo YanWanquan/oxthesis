@@ -14,11 +14,6 @@ import matplotlib.pyplot as plt
 from libs.models.tsmom import MACDStrategy
 import libs.utils as utils
 
-# ?! add proper factory
-
-# ?! add proper factory
-#import futures_config
-
 # --- --- ---
 
 
@@ -65,7 +60,7 @@ class DataTypes(IntEnum):
 
     # ?! -> add proper checks
     @classmethod
-    def get_config(cls, laoder_name):
+    def get_config(cls, loader_name):
         if cls._check_loader_name(loader_name):
             return futures_configs
  """
@@ -83,7 +78,6 @@ class BaseDataLoader:
         self.raw_df = self.load_raw_df(filename, index_col)
         self.df = self.get_covariates(lead_target=lead_target)
 
-        # filter afterwards (otherwise we would need to use a different threshold)
         self.raw_df = self.filter_df(
             self.raw_df, start_date=self.start_date, end_date=self.end_date)
         self.df = self.filter_df(
@@ -175,12 +169,15 @@ class BaseDataLoader:
 
     def train_split_data(self, df):
         data = {}
-        calib_data = self.df[self.df.index < self.test_date]
-        test_T = int(0.9 * len(calib_data))
+        calib_data = df[df.index < self.test_date]
+        #test_T = int(0.9 * len(calib_data))
+        #data[DataTypes.TRAIN] = calib_data.iloc[:test_T]
+        #data[DataTypes.VAL] = calib_data.iloc[test_T:]
 
-        data[DataTypes.TRAIN] = calib_data.iloc[:test_T]
-        data[DataTypes.VAL] = calib_data.iloc[test_T:]
-        data[DataTypes.TEST] = self.df[self.df.index >= self.test_date]
+        mask = np.random.rand(len(calib_data)) < 0.8
+        data[DataTypes.TRAIN] = calib_data[mask].copy()
+        data[DataTypes.VAL] = calib_data[~mask].copy()
+        data[DataTypes.TEST] = df[df.index >= self.test_date].copy()
 
         return data
 
@@ -205,7 +202,7 @@ class BaseDataLoader:
         inactive_flags = self.flag_inactive_sequences(prs)
         prs = (prs * (1 - inactive_flags)).replace({0: np.nan})
 
-        prs = self.winzorize_df(prs, halflife=smooth_window, threshold=3)
+        prs = self.winzorize_df(prs, halflife=smooth_window, threshold=5)
 
         return prs
 

@@ -25,7 +25,8 @@ FILE_PATHS = glob.glob('*_RAD.{}'.format(extension))
 cols = ['time', 'open', 'high', 'low', 'close', 'volume', 'open_interest']
 index_col = 0
 sel_cols = ['close']
-sel_inst = ["CC","DA","GI","JO","KC","KW","LB","NR","SB","ZA","ZC","ZF","ZG","ZH","ZI","ZK","ZL","ZN","ZO","ZP","ZR","ZT","ZU","ZW","ZZ","CA","EN","ER","ES","LX","MD","SC","SP","XU","XX","YM","DT","FB","TY","UB","US","AN","BN","CN","DX","FN","JN","MP","NK","SN"]
+sel_inst = ["CC", "DA", "GI", "JO", "KC", "KW", "LB", "NR", "SB", "ZA", "ZC", "ZF", "ZG", "ZH", "ZI", "ZK", "ZL", "ZN", "ZO", "ZP", "ZR", "ZT", "ZU", "ZW",
+            "ZZ", "CA", "EN", "ER", "ES", "LX", "MD", "SC", "SP", "XU", "XX", "YM", "DT", "FB", "TY", "UB", "US", "AN", "BN", "CN", "DX", "FN", "JN", "MP", "NK", "SN"]
 
 dfs = []
 for i, path in enumerate(FILE_PATHS):
@@ -46,9 +47,6 @@ for i, path in enumerate(FILE_PATHS):
 
 df = reduce(lambda left, right: pd.merge(left, right, left_index=True, right_index=True,
                                          how='outer'), dfs)
-
-# filter df
-df = df['1990-01-01':]
 
 print(df)
 print(df.shape)

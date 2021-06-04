@@ -89,7 +89,7 @@ def run_test_window(args):
         train_dict = pickle.load(open(args.checkpoint_path, 'rb'))
         # need dill as we include lambda fcn
         arch = train_dict['arch']
-        model = train_dict['model']
+        model = train_dict['model'].double()
         train_manager = train_dict['train_manager']
 
         print(
@@ -99,7 +99,6 @@ def run_test_window(args):
     # (2) Load data
     print("(2) Load data")
     index_col = 0
-    test_batch_size = 1024
 
     if args.model_type in ['tsmom', 'long']:
         train_manager = {
@@ -126,12 +125,12 @@ def run_test_window(args):
         test_dataloader = None
     elif args.model_type == 'ml':
         scaler_path = train_manager['scaler_path'] if args.scaler_path is None else args.scaler_path
-        train_manager['scaler'] = pickle.load(open(scaler_path, 'rb'))
+        train_manager['scaler'] = utils.load_scaler(scaler_path=scaler_path)
 
         dataset_test = FuturesDataset(
             base_loader, DataTypes.TEST, win_size=train_manager['args']['win_len'], tau=train_manager['args']['lead_target'], step=train_manager['args']['step'], scaler=train_manager['scaler'])
         test_dataloader = DataLoader(
-            dataset_test, batch_size=test_batch_size, shuffle=False)
+            dataset_test, batch_size=train_manager['args']['batch_size'], shuffle=True)
 
     # (3) Evaluate
     print("(3) Evaluate model")
@@ -150,9 +149,6 @@ def evaluate(model, data_iter, base_df, train_manager):
         return 1
 
     # --- ---
-
-    model.eval()
-    model = model.double()
 
     # evaluate test data ----
     test_loss = evaluate_model(model, data_iter, train_manager)
@@ -182,10 +178,10 @@ def evaluate(model, data_iter, base_df, train_manager):
         file_label='rts', model=model.name, setting=train_manager['setting'], time_test=train_manager['args']['test_date'], file_type='csv')
     str_returns.to_csv(str_returns_file_path)
 
-    agg_str_total_returns = calc_total_returns(
-        str_returns, aggregate_by='time')
-    print(
-        f">> Total strategy return from {agg_str_total_returns.index[0]} to {agg_str_total_returns.last_valid_index()}: {agg_str_total_returns[agg_str_total_returns.last_valid_index()]}")
+    # agg_str_total_returns = calc_total_returns(
+    #    str_returns, aggregate_by='time')
+    # print(
+    #   f">> Total strategy return from {agg_str_total_returns.index[0]} to {agg_str_total_returns.last_valid_index()}: {agg_str_total_returns[agg_str_total_returns.last_valid_index()]}")
 
     # plot ----
     # trs_plot_path = utils.get_save_path(
@@ -196,10 +192,11 @@ def evaluate(model, data_iter, base_df, train_manager):
 
 
 def evaluate_model(model, data_iter, train_manager, do_log=None):
-    loss_fn = train_manager['loss_fn']
-    total_val_loss = 0.
-
     model.eval()
+
+    loss_fn = train_manager['loss_fn']
+    total_loss = np.zeros((len(data_iter), 2))  # batch loss & batch size
+
     with torch.no_grad():
         for i, batch in enumerate(data_iter):
             inputs = batch['inp'].double().to(device)
@@ -222,9 +219,11 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
             else:
                 loss = loss_fn(prediction, labels)
 
-            total_val_loss += loss
+            batch_size = batch['inp'].shape[0]
+            total_loss[i] = np.array([loss, batch_size])
 
-    return total_val_loss / len(data_iter)
+    mean_loss = np.average(total_loss[:, 0], weights=total_loss[:, 1])
+    return mean_loss
 
 
 def calc_position_df(prediction, loss_type):
@@ -297,7 +296,7 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
                 predictions_df.loc[slicer] = prediction_i
 
     # inverse scale trend predictions
-    if scaler is not None and LossHelper.get_prediction_type(loss_type) == 'trend':
+    if (scaler is not None and scaler is not "none") and LossHelper.get_prediction_type(loss_type) == 'trend':
         prediction = utils.inverse_scale_tensor(
             df=predictions_df, scaler_dict=scaler)
 

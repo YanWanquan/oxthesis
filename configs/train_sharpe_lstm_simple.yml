@@ -6,29 +6,26 @@ HPARAMS: [
     logdir: LOGDIR,
     # loss
     loss_type: 'sharpe',
-    scaler: None,
+    scaler: 'none',
     # data
     filename: ['futures_prop.csv'],
-    start_date: ['01/01/1990'],
     test_win: 5,
+    start_date: ['01/01/1990'],
     test_date: ['01/01/1995'],
-    end_date: ['17/10/2020'],
+    end_date: ['01/01/2020'],
     # window
     win_len: [63],
-    step: [10],
+    step: [63],
     # training
-    epochs: [100],
-    lr: [0.0001, 0.001, 0.01],
-    batch_size: [128, 256, 512],
+    epochs: [300],
+    lr: [0.001],
+    batch_size: [64],
+    dropout: [0],
     patience: 25,
-    # --- ---
-    # all params above are inherited in the next runs
-    # --- ---
+    max_grad_norm: 0.5,
     # architecture specific
     arch: 'lstm',
-    # model hyperparams
     n_layer: 1,
-    d_model: [20, 80],
-    dropout: [0.9, 0.5]
+    d_hidden: [40]
   }
 ]

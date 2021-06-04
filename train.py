@@ -4,8 +4,6 @@
 # --- --- ---
 
 from operator import mod
-import os
-import dill
 from datetime import datetime, timedelta
 from sys import platform
 import argparse
@@ -30,12 +28,9 @@ from libs.futures_dataset import FuturesDataset
 # models
 from libs.models.transformer import TransformerEncoder
 from libs.models.conv_transformer import ConvTransformerEncoder
-from libs.models.lstm import LSTM
+from libs.models.lstm_dropout import LSTM
 from libs.losses import LossTypes, LossHelper
 from libs.models.informer import InformerEncoder
-
-# To-Do
-# - add the option not to use logx
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -45,6 +40,8 @@ train_archs = {
     'conv_transformer': ConvTransformerEncoder,
     'informer': InformerEncoder
 }
+
+# torch.manual_seed(0)
 
 # --- --- ---
 # --- --- ---
@@ -58,7 +55,7 @@ def get_args():
     loss_dict = {LossHelper.get_name(loss): loss
                  for loss in LossHelper.get_valid_losses()}
     if platform == "linux" or platform == "linux2":
-        default_log_path = '/nfs/home/sveng/runx/tmp'
+        default_log_path = '/nfs/home/sveng/logs/tmp'
     elif platform == "darwin":
         default_log_path = '/Users/svengiegerich/runx/tmp'
 
@@ -67,9 +64,9 @@ def get_args():
                         default=default_log_path, help="Learning architecture")
     # main params ----
     parser.add_argument('--arch', type=str, nargs='?', choices=list(
-        train_archs.keys()), default="transformer", help="Learning architecture")
+        train_archs.keys()), default="lstm", help="Learning architecture")
     parser.add_argument('--loss_type', type=str, nargs='?', choices=list(
-        loss_dict.keys()), default="mse", help="Loss function")
+        loss_dict.keys()), default="sharpe", help="Loss function")
     # data ----
     parser.add_argument('--filename', type=str, nargs='?',
                         default="futures_prop.csv", help="Filename of corresponding .csv-file")
@@ -78,39 +75,39 @@ def get_args():
     parser.add_argument('--start_date', type=str, nargs='?',
                         default="01/01/1990", help="Start date")
     parser.add_argument('--test_date', type=str, nargs='?',
-                        default="01/01/1995", help="Test date")
+                        default="01/01/2000", help="Test date")
     parser.add_argument('--test_win', type=int, nargs='?',
                         default=None, help="If set, it runs a expanding window approach; expects the window length in years")
     parser.add_argument('--end_date', type=str, nargs='?',
-                        default="10/01/2020", help="Last date")
+                        default="10/01/2005", help="Last date")
     parser.add_argument('--scaler', type=str, nargs='?', choices=['none', 'minmax', 'standard'],
-                        default="standard", help="Sklearn scaler to use")
+                        default="none", help="Sklearn scaler to use")
     # window ----
     parser.add_argument('--lead_target', type=int, nargs='?',
                         default=1, help="The #lead between input and target")
     parser.add_argument('--win_len', type=int, nargs='?',
                         default=63, help="Window length to slice data")
     parser.add_argument('--step', type=int, nargs='?',
-                        default=1, help="If step is not equal win_len the windows will overlap")
+                        default=63, help="If step is not equal win_len the windows will overlap")
     # training ----
     parser.add_argument('--epochs', type=int, nargs='?',
-                        default=1, help="Number of maximal epochs")
+                        default=10, help="Number of maximal epochs")
     parser.add_argument('--patience', type=int, nargs='?',
                         default=25, help="Early stopping rule")
     parser.add_argument('--lr', type=float, nargs='?',
-                        default=0.001, help="Learning rate")
+                        default=0.01, help="Learning rate")
     parser.add_argument('--batch_size', type=int, nargs='?',
                         default=128, help="Batch size for training")
     parser.add_argument('--max_grad_norm', type=float, nargs='?',
-                        default=0.1, help="Max gradient norm for clipping")
+                        default=0.01, help="Max gradient norm for clipping")
     parser.add_argument('--dropout', type=float, nargs='?',
-                        default=0.1, help="Dropout rate applied to all layers of an arch")
+                        default=0.5, help="Dropout rate applied to all layers of an arch")
     # model specific params
     # .. all models
     parser.add_argument('--n_layer', type=int, nargs='?',
-                        default=1, help="Number of sub-encoder layers in transformer")
+                        default=2, help="Number of sub-encoder layers in transformer")
     parser.add_argument('--d_hidden', type=int, nargs='?',
-                        default=20, help="Dimension of feedforward network model")
+                        default=10, help="Dimension of feedforward network model (transformer) or in hidden state h (lstm)")
     # .. transformer
     parser.add_argument('--d_model', type=int, nargs='?',
                         default=60, help="Number of features in the encoder inputs")
@@ -186,9 +183,6 @@ def run_training_window(args):
     # (1) load data ----
     print("(1) Load data")
     index_col = 0
-    train_batch_size = args.batch_size
-    val_batch_size = 254
-    test_batch_size = 254
 
     base_loader = BaseDataLoader(
         filename=args.filename, index_col=index_col, start_date=args.start_date, end_date=args.end_date, test_date=args.test_date, lead_target=args.lead_target)
@@ -202,19 +196,19 @@ def run_training_window(args):
         base_loader, DataTypes.VAL, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
     dataset_test = FuturesDataset(
         base_loader, DataTypes.TEST, win_size=args.win_len, tau=args.lead_target, step=args.step, scaler_type=args.scaler)
-    train_dataloader = DataLoader(
-        dataset_train, batch_size=train_batch_size, shuffle=True)
-    test_dataloader = DataLoader(
-        dataset_test, batch_size=test_batch_size, shuffle=True)
-    val_dataloader = DataLoader(
-        dataset_val, batch_size=val_batch_size, shuffle=False)
 
+    train_dataloader = DataLoader(
+        dataset_train, batch_size=args.batch_size, shuffle=True)
+    test_dataloader = DataLoader(
+        dataset_test, batch_size=args.batch_size, shuffle=True)
+    val_dataloader = DataLoader(
+        dataset_test, batch_size=args.batch_size, shuffle=True)
+
+    msg_sample_sizes = f"> Train sample size: {len(train_dataloader) * args.batch_size} \t val sample size: {len(val_dataloader) * args.batch_size}  \t test sample size: {len(test_dataloader) * args.batch_size}"
     if args.do_log:
-        logx.msg(
-            f"> Train sample size: {len(train_dataloader) * train_batch_size} \t train sample size: {len(test_dataloader) * test_batch_size}")
+        logx.msg(msg_sample_sizes)
     else:
-        print(
-            f"> Train sample size: {len(train_dataloader) * train_batch_size} \t train sample size: {len(test_dataloader) * test_batch_size}")
+        print(msg_sample_sizes)
 
     # (2) define training meta-data
     print("(2) Setup training manager")
@@ -281,10 +275,10 @@ def run_training_window(args):
     elif args.arch == 'lstm':
         dropout = 0.
         dropoutw = args.dropout
-        dropouti = 0.
-        dropouto = 0.
+        dropouti = args.dropout
+        dropouto = args.dropout
         if args.n_layer > 1:
-            d_hidden = [args.d_hidden for l in range(args.n_layer)]
+            args.d_hidden = [args.d_hidden for l in range(args.n_layer)]
         model = LSTM(d_input=d_input, d_output=d_output,
                      d_hidden=args.d_hidden, n_layer=args.n_layer, dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
     elif args.arch == 'informer':
@@ -304,11 +298,12 @@ def run_training_window(args):
     # (4) train model ----
     print("(4) Start training")
 
-    train_manager['setting'] = '{}_{}_ty-{}_bs-{}_lr-{}_pa-{}_gn-{}_wl-{}_ws-{}_nl-{}_dm-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
+    # label the experiment
+    train_manager['setting'] = 'a-{}_l-{}_ty-{}_bs-{}_lr-{}_pa-{}_gn-{}_wl-{}_ws-{}_nl-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
         args.test_date).year, args.batch_size, args.lr, args.patience, args.max_grad_norm, args.win_len, args.step, args.n_layer, args.d_model, args.d_hidden, args.dropout)
     if model.name in ['transformer', 'conv_transformer', 'informer']:
         train_manager['setting'] = train_manager['setting'] + \
-            '_nh-{}'.format(args.n_head,)
+            'dm_-{}_nh-{}'.format(args.d_model, args.n_head)
     if model.name == 'conv_transformer':
         train_manager['setting'] = train_manager['setting'] + \
             '_ql-{}'.format(args_conv_transf['q_len'])
@@ -320,8 +315,8 @@ def run_training_window(args):
     print("--- --- ---")
 
     # (5) test model ----
-    test_loss = evaluate_test(model=model, train_iter=test_dataloader,
-                              train_manager=train_manager, do_log=False).cpu().numpy()
+    test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
+                              train_manager=train_manager, do_log=False)
     print(f">> Test loss: {test_loss}")
 
     print("(6) Finished training")
@@ -336,11 +331,8 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
     train_manager['optimizer'] = torch.optim.Adam(
         model.parameters(), lr=train_manager['lr'])
 
-    if do_log:
-        stopping_path = None
-    else:
-        stopping_path = train_manager['args']['logdir'] + "/" + \
-            train_manager['setting'] + '.p'
+    stopping_path = train_manager['args']['logdir'] + "/" + "opt_" + \
+        train_manager['setting'] + '.p'
     early_stopping = EarlyStopping(
         patience=train_manager['patience'], path=stopping_path, verbose=True)
 
@@ -348,20 +340,20 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
     for epoch_i in range(train_manager['epochs']):
         epoch_loss = run_epoch(
             model=model, train_iter=train_iter, train_manager=train_manager, epoch_i=epoch_i, do_log=do_log)
-        val_loss = evaluate_validation(
-            model=model, val_iter=val_iter, train_manager=train_manager)
+        val_loss = evaluate_iter(
+            model=model, data_iter=val_iter, train_manager=train_manager)
 
         if val_loss < best_val_score:
             best_val_score = val_loss
 
         # verb ----
-        epoch_print = f">> Train Epoch {epoch_i + 1}\t --- ---\t train loss: {epoch_loss}\t val loss: {val_loss}"
+        epoch_print = f">> Train Epoch {epoch_i + 1}\t -- avg --\t train loss: {epoch_loss}\t val loss: {val_loss}"
         if do_log:
             logx.msg(epoch_print)
             logx.add_scalar("Loss/val", val_loss, epoch_i)
 
-            metrics_train = {'loss': epoch_loss.data.cpu().numpy()}
-            metrics_val = {'loss': val_loss.data.cpu().numpy()}
+            metrics_train = {'loss': epoch_loss}
+            metrics_val = {'loss': val_loss}
             logx.metric(phase='train', metrics=metrics_train,
                         epoch=epoch_i + 1)
             logx.metric(phase='val', metrics=metrics_val,
@@ -379,6 +371,11 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
         #    logx.save_model(save_dict, metric=val_loss,
         #                    epoch=epoch_i + 1, higher_better=False)
 
+        # save the current epoch & overwrite old checkpoint (filename: <setting>.tmp)
+        checkpoint_path = train_manager['args']['logdir'] + \
+            "/" + train_manager['setting'] + ".tmp"
+        pickle.dump(save_dict, open(checkpoint_path, 'wb'))
+
         # early stopping ----
         early_stopping(val_loss, model)
 
@@ -392,17 +389,18 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
 
 def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
     model.train()
+
     optimizer = train_manager['optimizer']
     loss_fn = train_manager['loss_fn']
     max_grad_norm = train_manager['args']['max_grad_norm']
 
-    loss_epoch = 0.
+    loss_epoch = np.zeros((len(train_iter), 2))  # batch loss & batch size
     for i, batch in enumerate(train_iter):
-        optimizer.zero_grad()
-
         inputs = batch['inp'].double().to(device)
         labels = batch['trg'].double().to(device)
         returns = batch['rts'].double().to(device)
+
+        optimizer.zero_grad()
 
         # time embedding?
         if model.name == 'informer':
@@ -422,14 +420,14 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             loss = loss_fn(prediction, labels)
 
         loss.backward()
-
-        # clip gradients
         torch.nn.utils.clip_grad_norm_(
             model.parameters(), max_norm=max_grad_norm)
         optimizer.step()
 
+        batch_size = batch['inp'].shape[0]
+        loss_epoch[i] = np.array([loss, batch_size])
+
         # log results
-        loss_epoch += loss
         if epoch_i is not None and i % 5 == 0:
             if do_log:
                 writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
@@ -441,15 +439,13 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             else:
                 print(print_msg)
 
-    return loss_epoch / (len(train_iter) - 1)
+    mean_loss_epoch = np.average(loss_epoch[:, 0], weights=loss_epoch[:, 1])
+    return mean_loss_epoch
 
 
-def evaluate_validation(model, val_iter, train_manager, do_log=False):
-    return evaluate_model(model, val_iter, train_manager, do_log=do_log)
+def evaluate_iter(model, data_iter, train_manager, do_log=False):
+    return evaluate_model(model, data_iter, train_manager, do_log=do_log)
 
-
-def evaluate_test(model, train_iter, train_manager, do_log=False):
-    return evaluate_model(model, train_iter, train_manager, do_log=do_log)
 
 # --- --- ---
 # --- --- ---
