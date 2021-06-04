@@ -43,8 +43,8 @@ def calc_loss_sharpe(pred_position, returns_scaled, freq='d'):
     return -sharpe
 
 
-def calc_captured_return(pred_position, returns_scaled):
-    return pred_position * returns_scaled
+def calc_captured_return(pred_position, returns_scaled_lead):
+    return pred_position * returns_scaled_lead
 
 
 class LossHelper:

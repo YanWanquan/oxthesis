@@ -19,7 +19,6 @@ import pickle
 import libs.utils as utils
 from libs.losses import LossHelper, LossTypes
 from libs.models.informer import time_features
-from libs.pytorch_utils import EarlyStopping
 # eval
 from evaluate import evaluate_model
 # data
@@ -101,11 +100,11 @@ def get_args():
     parser.add_argument('--max_grad_norm', type=float, nargs='?',
                         default=0.01, help="Max gradient norm for clipping")
     parser.add_argument('--dropout', type=float, nargs='?',
-                        default=0.5, help="Dropout rate applied to all layers of an arch")
+                        default=0, help="Dropout rate applied to all layers of an arch")
     # model specific params
     # .. all models
     parser.add_argument('--n_layer', type=int, nargs='?',
-                        default=2, help="Number of sub-encoder layers in transformer")
+                        default=1, help="Number of sub-encoder layers in transformer")
     parser.add_argument('--d_hidden', type=int, nargs='?',
                         default=10, help="Dimension of feedforward network model (transformer) or in hidden state h (lstm)")
     # .. transformer
@@ -156,7 +155,7 @@ def main():
         pd.Series(test_loss, name=setting).to_csv(args.logdir +
                                                   f"/exp_win_test_loss_m-{test_mean}.csv")
         print(
-            f"> Finished expanding window training \t mean test loss: {test_mean}")
+            f"> Finished expanding window training \t test loss: {test_mean}")
     elif args.test_date is not None:
         print("> Start single window training")
         args.do_log = True
@@ -199,9 +198,9 @@ def run_training_window(args):
 
     train_dataloader = DataLoader(
         dataset_train, batch_size=args.batch_size, shuffle=True)
-    test_dataloader = DataLoader(
-        dataset_test, batch_size=args.batch_size, shuffle=True)
     val_dataloader = DataLoader(
+        dataset_val, batch_size=args.batch_size, shuffle=True)
+    test_dataloader = DataLoader(
         dataset_test, batch_size=args.batch_size, shuffle=True)
 
     msg_sample_sizes = f"> Train sample size: {len(train_dataloader) * args.batch_size} \t val sample size: {len(val_dataloader) * args.batch_size}  \t test sample size: {len(test_dataloader) * args.batch_size}"
@@ -277,10 +276,10 @@ def run_training_window(args):
         dropoutw = args.dropout
         dropouti = args.dropout
         dropouto = args.dropout
-        if args.n_layer > 1:
-            args.d_hidden = [args.d_hidden for l in range(args.n_layer)]
+        args.d_hidden = [args.d_hidden for l in range(args.n_layer)]
         model = LSTM(d_input=d_input, d_output=d_output,
                      d_hidden=args.d_hidden, n_layer=args.n_layer, dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
+        args.d_hidden = args.d_hidden[0]
     elif args.arch == 'informer':
         # tmp: at the moment no hyperparamter
         freq = 'd'  # daily
@@ -288,10 +287,14 @@ def run_training_window(args):
         d_ff = args.d_model
         attn = 'prob'  # 'full' or 'prob'
         embed = 'fixed'  # could be changed to learnable
-        do_distil = True
+        # if n_layer > 1: each succ layer will be reduced by 2
+        do_distil = False  # tmp! check again if adoptable?!
         output_attention = True
-        model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor, loss_type=train_manager['loss_type'], d_model=args.d_model, n_heads=args.n_head,
-                                e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed=embed, freq=freq, output_attention=output_attention, distil=do_distil)
+        win_len = args.win_len
+        model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor,
+                                loss_type=train_manager['loss_type'], d_model=args.d_model, n_heads=args.n_head,
+                                e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed=embed,
+                                freq=freq, output_attention=output_attention, distil=do_distil, win_len=win_len)
     else:
         raise NotImplementedError("Architecture not implemented yet.")
 
@@ -300,21 +303,24 @@ def run_training_window(args):
 
     # label the experiment
     train_manager['setting'] = 'a-{}_l-{}_ty-{}_bs-{}_lr-{}_pa-{}_gn-{}_wl-{}_ws-{}_nl-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
-        args.test_date).year, args.batch_size, args.lr, args.patience, args.max_grad_norm, args.win_len, args.step, args.n_layer, args.d_model, args.d_hidden, args.dropout)
+        args.test_date).year, args.batch_size, args.lr, args.patience, args.max_grad_norm, args.win_len, args.step, args.n_layer, args.d_hidden, args.dropout)
     if model.name in ['transformer', 'conv_transformer', 'informer']:
         train_manager['setting'] = train_manager['setting'] + \
-            'dm_-{}_nh-{}'.format(args.d_model, args.n_head)
+            '_dm-{}_nh-{}'.format(args.d_model, args.n_head)
     if model.name == 'conv_transformer':
         train_manager['setting'] = train_manager['setting'] + \
             '_ql-{}'.format(args_conv_transf['q_len'])
     if args.do_log:
         logx.msg(f"Setting: {train_manager['setting']}")
+    else:
+        print(f"Setting: {train_manager['setting']}")
 
-    train(model=model, train_iter=train_dataloader,
-          val_iter=val_dataloader, train_manager=train_manager, do_log=args.do_log)
+    best_checkpoint_path = train(model=model, train_iter=train_dataloader,
+                                 val_iter=val_dataloader, train_manager=train_manager, do_log=args.do_log)
     print("--- --- ---")
 
     # (5) test model ----
+    _, model, train_manager = utils.load_model(path=best_checkpoint_path)
     test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
                               train_manager=train_manager, do_log=False)
     print(f">> Test loss: {test_loss}")
@@ -333,7 +339,7 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
 
     stopping_path = train_manager['args']['logdir'] + "/" + "opt_" + \
         train_manager['setting'] + '.p'
-    early_stopping = EarlyStopping(
+    early_stopping = utils.EarlyStopping(
         patience=train_manager['patience'], path=stopping_path, verbose=True)
 
     # run training ----
@@ -385,6 +391,8 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
         if early_stopping.early_stop:
             print(f"> Early stopping")
             break
+
+    return early_stopping.path
 
 
 def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):

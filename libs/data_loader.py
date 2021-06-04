@@ -167,16 +167,20 @@ class BaseDataLoader:
 
         return df
 
-    def train_split_data(self, df):
+    def train_split_data(self, df, train_val_ratio=0.8):
         data = {}
         calib_data = df[df.index < self.test_date]
-        #test_T = int(0.9 * len(calib_data))
-        #data[DataTypes.TRAIN] = calib_data.iloc[:test_T]
-        #data[DataTypes.VAL] = calib_data.iloc[test_T:]
 
-        mask = np.random.rand(len(calib_data)) < 0.8
-        data[DataTypes.TRAIN] = calib_data[mask].copy()
-        data[DataTypes.VAL] = calib_data[~mask].copy()
+        # split based on time btw test & val
+        test_T = int(train_val_ratio * len(calib_data))
+        data[DataTypes.TRAIN] = calib_data.iloc[:test_T]
+        data[DataTypes.VAL] = calib_data.iloc[test_T:]
+
+        # split randomly btw test & val
+        #mask = np.random.rand(len(calib_data)) < train_val_ratio
+        #data[DataTypes.TRAIN] = calib_data[mask].copy()
+        #data[DataTypes.VAL] = calib_data[~mask].copy()
+
         data[DataTypes.TEST] = df[df.index >= self.test_date].copy()
 
         return data

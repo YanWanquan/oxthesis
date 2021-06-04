@@ -6,6 +6,7 @@ results/*
 .runx
 sandbox.ipynb
 *.p
+*.png
 
 # Pytorch
 *.pth

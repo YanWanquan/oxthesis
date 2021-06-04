@@ -37,9 +37,19 @@ class InformerEncoder(nn.Module):
 
     def __init__(self, enc_in, c_out, loss_type,
                  factor=5, d_model=512, n_heads=8, e_layers=3, d_ff=512,
-                 dropout=0.0, attn='prob', embed='fixed', freq='h', activation='gelu',
-                 output_attention=True, distil=True, win_len=None):
+                 dropout=0.0, attn='prob', embed='fixed', freq='d', activation='gelu',
+                 output_attention=True, distil=False, win_len=None):
         super(InformerEncoder, self).__init__()
+
+        self.enc_in = enc_in
+        self.c_out = c_out
+        self.factor = factor
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.e_layers = e_layers
+        self.d_ff = d_ff
+        self.dropout = dropout
+        self.freq = freq
         self.attn = attn
         self.output_attention = output_attention
         self.win_len = win_len
@@ -79,12 +89,12 @@ class InformerEncoder(nn.Module):
         self.decoder = nn.Linear(d_model, c_out, bias=True)
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
-    def forward(self, x_enc, x_mark_enc, enc_self_mask=None):
+    def forward(self, src, x_mark_enc, enc_self_mask=None):
         # if enc_self_mask is None:
-        #   enc_self_mask = self.generate_causal_mask(x_enc.shape[1])
+        #    enc_self_mask = self.generate_causal_mask(src.shape[1])
 
-        enc_out = self.enc_embedding(x_enc, x_mark_enc)
-        enc_out, attns = self.encoder(enc_out, attn_mask=enc_self_mask)
+        emb = self.enc_embedding(src, x_mark_enc)
+        enc_out, attns = self.encoder(emb, attn_mask=enc_self_mask)
 
         # SVEN: leave out the decoder part
         dec_out = self.decoder(enc_out)
@@ -285,6 +295,7 @@ class ProbAttention(nn.Module):
 
     def _get_initial_context(self, V, L_Q):
         B, H, L_V, D = V.shape
+
         if not self.mask_flag:
             # V_sum = V.sum(dim=-2)
             V_sum = V.mean(dim=-2)
@@ -309,8 +320,19 @@ class ProbAttention(nn.Module):
                    torch.arange(H)[None, :, None],
                    index, :] = torch.matmul(attn, V).type_as(context_in)
         if self.output_attention:
+            # SVEN: add uniform distribution
             attns = (torch.ones([B, H, L_V, L_V]) /
                      L_V).type_as(attn).to(attn.device)
+
+            # SVEN: probably just for visz. -> more substantive for context
+            # ... add mask here!
+            # ... but also necessary somwhere else? as this only effects display
+            causal_mask = TriangularCausalMask(
+                B, L_Q, device).mask[0, :, :].squeeze()
+            attns.masked_fill_(causal_mask, 0)  # broadcasting
+            # END SVEN
+
+            # SVEN: add the actual attention values for the sparse entries
             attns[torch.arange(B)[:, None, None], torch.arange(H)[
                 None, :, None], index, :] = attn
             return (context_in, attns)

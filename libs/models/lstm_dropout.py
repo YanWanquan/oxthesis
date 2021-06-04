@@ -172,7 +172,7 @@ class WeightDrop(torch.nn.Module):
             self.module.flatten_parameters = self.widget_demagnetizer_y2k_edition
 
         for name_w in self.weights:
-            print('Applying weight drop of {} to {}'.format(self.dropout, name_w))
+            print('> Applying weight drop of {} to {}'.format(self.dropout, name_w))
             w = getattr(self.module, name_w)
             del self.module._parameters[name_w]
             self.module.register_parameter(name_w + '_raw', Parameter(w.data))

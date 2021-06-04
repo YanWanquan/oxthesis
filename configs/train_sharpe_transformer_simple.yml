@@ -18,18 +18,18 @@ HPARAMS: [
     step: [63],
     # training
     epochs: [300],
-    lr: [0.01, 0.001],
-    batch_size: [64, 128],
-    dropout: [0, 0.1, 0.3, 0.5],
+    lr: [0.01],
+    batch_size: [128],
+    dropout: [0.1],
     patience: 25,
-    max_grad_norm: [1, 0.1],
+    max_grad_norm: [0.1],
     # architecture specific
     arch: 'transformer',
-    # model hyperparams
-    d_hidden: [10, 30, 80],
-    d_model: [60, 120],
+    # model hyperparams,
+    d_hidden: [80]
+    d_model: [60],
     n_head: [12],
-    n_layer: [1, 2],
-    d_hidden_factor: [2, 4], # replace with a factor
+    n_layer: [1],
+    d_hidden_factor: [2], # replace with a factor
   }
 ]

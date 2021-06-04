@@ -8,7 +8,6 @@ import argparse
 import enum
 import os
 import glob
-import dill
 import libs.utils as utils
 import pandas as pd
 import numpy as np
@@ -86,15 +85,8 @@ def run_test_window(args):
 
     # (1) Load model
     if args.model_type not in ['tsmom', 'long']:
-        train_dict = pickle.load(open(args.checkpoint_path, 'rb'))
-        # need dill as we include lambda fcn
-        arch = train_dict['arch']
-        model = train_dict['model'].double()
-        train_manager = train_dict['train_manager']
-
-        print(
-            f"(1) Load model with arch {arch} and loss type {train_manager['args']['loss_type']}")
-        print(f"> Setting: {train_manager['setting']}")
+        arch, model, train_manager = utils.load_model(
+            path=args.checkpoint_path)
 
     # (2) Load data
     print("(2) Load data")
