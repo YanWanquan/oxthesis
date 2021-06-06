@@ -63,7 +63,7 @@ def get_args():
                         default=default_log_path, help="Learning architecture")
     # main params ----
     parser.add_argument('--arch', type=str, nargs='?', choices=list(
-        train_archs.keys()), default="lstm", help="Learning architecture")
+        train_archs.keys()), default="transformer", help="Learning architecture")
     parser.add_argument('--loss_type', type=str, nargs='?', choices=list(
         loss_dict.keys()), default="sharpe", help="Loss function")
     # data ----
@@ -98,9 +98,9 @@ def get_args():
     parser.add_argument('--batch_size', type=int, nargs='?',
                         default=128, help="Batch size for training")
     parser.add_argument('--max_grad_norm', type=float, nargs='?',
-                        default=0.01, help="Max gradient norm for clipping")
+                        default=0.5, help="Max gradient norm for clipping")
     parser.add_argument('--dropout', type=float, nargs='?',
-                        default=0, help="Dropout rate applied to all layers of an arch")
+                        default=0.1, help="Dropout rate applied to all layers of an arch")
     # model specific params
     # .. all models
     parser.add_argument('--n_layer', type=int, nargs='?',

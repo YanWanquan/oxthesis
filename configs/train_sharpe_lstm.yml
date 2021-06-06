@@ -12,20 +12,20 @@ HPARAMS: [
     test_win: 5,
     start_date: ['01/01/1990'],
     test_date: ['01/01/1995'],
-    end_date: ['01/01/2020'],
+    end_date: ['11/01/2020'],
     # window
     win_len: [63],
     step: [63],
     # training
     epochs: [300],
-    lr: [0.01, 0.001],
-    batch_size: [64, 128],
+    lr: [0.01, 0.001, 0.0001],
+    batch_size: [64, 128, 256],
     dropout: [0, 0.1, 0.3, 0.5],
     patience: 25,
-    max_grad_norm: [1, 0.1],
+    max_grad_norm: [1, 0.1, 0.001],
     # architecture specific
     arch: 'lstm',
-    n_layer: 1,
-    d_hidden: [10, 30, 80]
+    n_layer: [1],
+    d_hidden: [10, 30, 80, 160]
   }
 ]
