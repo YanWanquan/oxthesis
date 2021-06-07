@@ -3,7 +3,7 @@
 # Sven Giegerich / 11.05.2021
 # --
 
-from torch._C import device
+from torch._C import Value, device
 from libs.data_loader import BaseDataLoader, DataTypes
 import libs.utils as utils
 from datetime import datetime
@@ -17,7 +17,10 @@ import numpy as np
 import sys
 import pickle
 from libs.models.informer import time_features as informer_time_features
+from libs.losses import LossTypes
 sys.path.append('../')
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class FuturesDataset(Dataset):
@@ -202,51 +205,71 @@ class FuturesDataset(Dataset):
             'prs': self.data[idx, :, self.prs_indexes]
         }
 
-    def plot_example(self, id, model=None, scaler=None):
+    def plot_example(self, id, model=None, loss_type=None, scaler="none"):
         """Plots a sample of the dataset"""
         # tbd: replace x-axis by 'time' (can not just add one day as this will confuse with weekends/bank holidays)
         inp_col = self.rts_indexes.index(self.cov_lookup['rts_scaled_lead'])
 
-        if scaler is not None:
+        if scaler != "none":
+            raise ValueError("Scaler not properly implemented yet!")
             trg = self[id]['trg'].cpu().numpy()
-            trg = scaler['trg'].inverse_transform(trg.reshape(-1, 1)).flatten()
+            if scaler != "none":
+                trg = scaler['trg'].inverse_transform(
+                    trg.reshape(-1, 1)).flatten()
         else:
             trg = self[id]['trg']
 
-        plt.figure(figsize=(12, 8))
-        plt.subplot(1, 1, 1)
+        fig, ax1 = plt.subplots()
 
         # observed returns
-        plt.plot(range(0, self.win_size-self.tau+1), self[id]['rts']
+        ax1.plot(range(0, self.win_size-self.tau+1), self[id]['rts']
                  [:, inp_col], label="Inputs", marker='.', zorder=-10)
 
         # target
-        plt.scatter(range(self.tau, self.win_size+1),
+        ax1.scatter(range(self.tau, self.win_size+1),
                     trg, label="Targets", marker='.', c='#2ca02c', s=64, edgecolors='k')
 
         if model is not None:
             with torch.no_grad():
+                inp = self[id]['inp'].unsqueeze(
+                    0).to(device)
+                emb = self[id]['time_embd'].unsqueeze(0).to(device)
+
                 if model.name == 'informer':
-                    pred = model(self[id]['inp'].unsqueeze(
-                        0), self[id]['time_embd'].unsqueeze(0))
+                    pred = model(inp, emb)
                     if len(pred) > 1:
                         # returns also the attention
                         attn = pred[1]
                         pred = pred[0]
                 else:
-                    pred = model(self[id]['inp'].unsqueeze(0))
+                    pred = model(inp)
                 pred = pred.squeeze().cpu().numpy()
 
-                if scaler is not None:
-                    # TMP: only if loss type is MSE
-                    pred = scaler['trg'].inverse_transform(
-                        pred.reshape(-1, 1)).flatten()
+                if scaler != "none":
+                    raise ValueError("Scaler option not implemented yet!")
 
-            plt.scatter(range(self.tau, self.win_size+1), pred, marker='X', edgecolors='k', label='Predictions',
-                        c='#ff7f0e', s=64)
+            print(loss_type)
 
-        plt.title(self[id]['inst'])
-        plt.legend()
+            if loss_type == LossTypes.SHARPE or loss_type == LossTypes.AVG_RETURNS:
+                # positions
+
+                ax1.tick_params(axis='y')
+                ax2 = ax1.twinx()
+                ax2.set_ylabel('pos')
+
+                ax2.scatter(range(self.tau, self.win_size+1), pred, marker='X', edgecolors='k', label='Predictions',
+                            c='#ff7f0e', s=64)
+
+                ax2.tick_params(axis='y')
+
+                fig.tight_layout()
+            else:
+                # predictions
+                plt.scatter(range(self.tau, self.win_size+1), pred, marker='X', edgecolors='k', label='Predictions',
+                            c='#ff7f0e', s=64)
+
+        ax1.set_title(self[id]['inst'])
+        ax1.legend()
         plt.show()
 
         # Attention

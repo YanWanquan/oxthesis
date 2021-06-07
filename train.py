@@ -109,9 +109,9 @@ def get_args():
                         default=10, help="Dimension of feedforward network model (transformer) or in hidden state h (lstm)")
     # .. transformer
     parser.add_argument('--d_model', type=int, nargs='?',
-                        default=60, help="Number of features in the encoder inputs")
+                        default=20, help="Number of features in the encoder inputs")
     parser.add_argument('--n_head', type=int, nargs='?',
-                        default=6, help="Number of heads in multiheadattention models")
+                        default=4, help="Number of heads in multiheadattention models")
     parser.add_argument('--d_hidden_factor', type=int, nargs='?',
                         default=0, help="d_dim = d_hidden_factor * d_hidden")
     # .. convolutional transformer
@@ -285,7 +285,7 @@ def run_training_window(args):
         freq = 'd'  # daily
         factor = 5  # factor to sample for prob attention
         d_ff = args.d_model
-        attn = 'prob'  # 'full' or 'prob'
+        attn = 'full'  # 'full' or 'prob'
         embed = 'fixed'  # could be changed to learnable
         # if n_layer > 1: each succ layer will be reduced by 2
         do_distil = False  # tmp! check again if adoptable?!

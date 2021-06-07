@@ -60,10 +60,15 @@ class InformerEncoder(nn.Module):
         mask_flag = True
 
         # Encoding
+        self.simple_embedding = nn.Linear(enc_in, d_model)
+
         self.enc_embedding = DataEmbedding(
             enc_in, d_model, embed, freq, dropout)
         # Attention
-        Attn = ProbAttention if attn == 'prob' else FullAttention
+        Attn = ProbCausalAttention if attn == 'prob' else FullAttention
+
+        print(f"> Using attention mechanism {Attn}")
+
         # Encoder
         self.encoder = Encoder(
             [
@@ -90,10 +95,10 @@ class InformerEncoder(nn.Module):
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
     def forward(self, src, x_mark_enc, enc_self_mask=None):
-        # if enc_self_mask is None:
-        #    enc_self_mask = self.generate_causal_mask(src.shape[1])
 
         emb = self.enc_embedding(src, x_mark_enc)
+        # emb = self.simple_embedding(src)
+
         enc_out, attns = self.encoder(emb, attn_mask=enc_self_mask)
 
         # SVEN: leave out the decoder part
@@ -258,6 +263,95 @@ class FullAttention(nn.Module):
             return (V.contiguous(), None)
 
 
+class ProbCausalAttention(nn.Module):
+    def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False):
+        super(ProbCausalAttention, self).__init__()
+        self.factor = factor
+        self.scale = scale
+        self.mask_flag = mask_flag
+        self.output_attention = output_attention
+        self.dropout = nn.Dropout(attention_dropout)
+
+    def _prob_QK(self, Q, K, sample_k, n_top):  # n_top: c*ln(L_q)
+        # Q [B, H, L, D]
+        B, H, L_K, E = K.shape
+        _, _, L_Q, _ = Q.shape
+
+        # calculate the sampled Q_K
+        K_expand = K.unsqueeze(-3).expand(B, H, L_Q, L_K, E)
+        # real U = U_part(factor*ln(L_k))*L_q
+        index_sample = torch.randint(L_K, (L_Q, sample_k))
+        K_sample = K_expand[:, :, torch.arange(
+            L_Q).unsqueeze(1), index_sample, :]
+        Q_K_sample = torch.matmul(
+            Q.unsqueeze(-2), K_sample.transpose(-2, -1)).squeeze()
+
+        # find the Top_k query with sparisty measurement
+        M = Q_K_sample.max(-1)[0] - torch.div(Q_K_sample.sum(-1), L_K)
+        M_top = M.topk(n_top, sorted=False)[1]
+
+        # use the reduced Q to calculate Q_K
+        Q_reduce = Q[torch.arange(B)[:, None, None],
+                     torch.arange(H)[None, :, None],
+                     M_top, :]  # factor*ln(L_q)
+        Q_K = torch.matmul(Q_reduce, K.transpose(-2, -1))  # factor*ln(L_q)*L_k
+
+        return Q_K, M_top
+
+    def forward(self, queries, keys, values, attn_mask):
+        B, L_Q, H, D = queries.shape
+        _, L_K, _, _ = keys.shape
+
+        queries = queries.transpose(2, 1)
+        keys = keys.transpose(2, 1)
+        values = values.transpose(2, 1)
+
+        U_part = self.factor * \
+            np.ceil(np.log(L_K)).astype('int').item()  # c*ln(L_k)
+        u = self.factor * \
+            np.ceil(np.log(L_Q)).astype('int').item()  # c*ln(L_q)
+
+        U_part = U_part if U_part < L_K else L_K
+        u = u if u < L_Q else L_Q
+
+        scores_top, index = self._prob_QK(
+            queries, keys, sample_k=U_part, n_top=u)
+
+        # add scale factor
+        scale = self.scale or 1./sqrt(D)
+        if scale is not None:
+            scores_top = scores_top * scale
+
+        # NEW: START ----
+
+        # uniform distr as starter
+        scores = (torch.ones([B, H, L_Q, L_Q]) /
+                  L_Q).type_as(scores_top).to(device)
+        # ... uniform
+        scores[torch.arange(B)[:, None, None],
+               torch.arange(H)[None, :, None],
+               index, :] = scores_top
+
+        # causal mask
+        if self.mask_flag:
+            if attn_mask is None:
+                attn_mask = TriangularCausalMask(B, L_Q, device=queries.device)
+
+            scores.masked_fill_(attn_mask.mask, -np.inf)
+
+        # tmp: plus dropout? not in prob, but in full... don't think necessary
+        A = torch.softmax(scale * scores, dim=-1)
+        V = torch.einsum("bhls,bhsd->blhd", A, values)
+
+        # NEW: END ----
+
+        if self.output_attention:
+            return (V.contiguous(), A)
+        else:
+            return (V.contiguous(), None)
+        pass
+
+
 class ProbAttention(nn.Module):
     def __init__(self, mask_flag=True, factor=5, scale=None, attention_dropout=0.1, output_attention=False):
         super(ProbAttention, self).__init__()
@@ -305,6 +399,15 @@ class ProbAttention(nn.Module):
             # requires that L_Q == L_V, i.e. for self-attention only
             assert(L_Q == L_V)
             contex = V.cumsum(dim=-2)
+
+            # SVEN: Start
+            # Apply causal mask to V instead of the sparse scores
+            # better to place it somewhere else?!
+            # causal_mask = TriangularCausalMask(
+            #    B, L_Q, device).mask[0, :, :].squeeze()
+            # V.masked_fill_(causal_mask, 0)  # broadcasting
+            # SVEN: End
+
         return contex
 
     def _update_context(self, context_in, V, scores, index, L_Q, attn_mask):

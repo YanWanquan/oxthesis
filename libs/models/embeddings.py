@@ -11,7 +11,7 @@ import math
 
 class SimplePositionalEncoding(nn.Module):
     """
-    This positional encoding is direclty based on the paper “Attention Is All You Need” using sin & cos addition.
+    This positional encoding is directly based on the paper “Attention Is All You Need” using sin & cos addition.
     For more see either the paper,
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and Illia Polosukhin. 2017
     or this blog article: https://kazemnejad.com/blog/transformer_architecture_positional_encoding/.

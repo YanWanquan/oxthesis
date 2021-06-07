@@ -260,6 +260,9 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
             if model.name == 'informer':
                 time_embd = batch['time_embd'].double().to(device)
                 prediction = model(input, time_embd)
+                if len(prediction) > 1:
+                    # returns also the attention
+                    prediction = prediction[0]
             else:
                 prediction = model(input)
 

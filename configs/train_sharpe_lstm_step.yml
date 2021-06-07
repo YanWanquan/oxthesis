@@ -15,20 +15,17 @@ HPARAMS: [
     end_date: ['11/01/2020'],
     # window
     win_len: [63],
-    step: [10, 32],
+    step: [10, 30, 63],
     # training
     epochs: [300],
-    lr: [0.01],
-    batch_size: [128],
-    dropout: [0.3, 0.5],
+    lr: [0.01, 0.001],
+    batch_size: [64, 128],
+    dropout: [0.1, 0.3],
     patience: 25,
-    max_grad_norm: [0.5],
+    max_grad_norm: [0.1, 0.001],
     # architecture specific
-    arch: 'transformer',
-    # model hyperparams
-    d_model: [32, 60, 120],
-    n_head: [4, 8],
+    arch: 'lstm',
     n_layer: [1],
-    d_hidden_factor: [2], # replace with a factor
+    d_hidden: [5, 10, 30]
   }
 ]
