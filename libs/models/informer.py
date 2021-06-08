@@ -1,5 +1,5 @@
 # --- --- ---
-# informer.py
+# informer_encoder.py
 # Sven Giegerich / 19.05.2021
 # --- --- ---
 
@@ -21,9 +21,10 @@ from math import sqrt
 from libs.losses import LossHelper
 import pickle
 
-from libs.models.embeddings import DataEmbedding
+from libs.models.embeddings import *
 
 # --- ---
+# ENCODER ONLY
 # model.py
 # --- ---
 
@@ -37,7 +38,7 @@ class InformerEncoder(nn.Module):
 
     def __init__(self, enc_in, c_out, loss_type,
                  factor=5, d_model=512, n_heads=8, e_layers=3, d_ff=512,
-                 dropout=0.0, attn='prob', embed='fixed', freq='d', activation='gelu',
+                 dropout=0.0, attn='prob', embed_type='fixed', freq='d', activation='gelu',
                  output_attention=True, distil=False, win_len=None):
         super(InformerEncoder, self).__init__()
 
@@ -53,17 +54,24 @@ class InformerEncoder(nn.Module):
         self.attn = attn
         self.output_attention = output_attention
         self.win_len = win_len
+        self.embed_type = embed_type  # either 'fixed' or 'timeF'
+        self.distil = distil
 
         if self.win_len is not None:
             self.enc_self_mask = self.generate_causal_mask(win_len)
 
         mask_flag = True
 
-        # Encoding
-        self.simple_embedding = nn.Linear(enc_in, d_model)
+        # Embedding
+        if self.embed_type == "simple":
+            print("> Use simple positional encoding")
+            self.enc_simple_embedding = nn.Linear(enc_in, d_model)
+            self.pos_encoder = SimplePositionalEncoding(d_model=d_model)
+        else:
+            print("> Use data embedding")
+            self.enc_data_embedding = DataEmbedding(
+                c_in=enc_in, d_model=d_model, embed_type=embed_type, freq=freq, dropout=dropout, only_encoder=True)
 
-        self.enc_embedding = DataEmbedding(
-            enc_in, d_model, embed, freq, dropout)
         # Attention
         Attn = ProbCausalAttention if attn == 'prob' else FullAttention
 
@@ -95,9 +103,12 @@ class InformerEncoder(nn.Module):
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
     def forward(self, src, x_mark_enc, enc_self_mask=None):
-
-        emb = self.enc_embedding(src, x_mark_enc)
-        # emb = self.simple_embedding(src)
+        if self.embed_type == "simple":
+            # opt1: simple pos encoding (original attention is all you need)
+            emb = self.pos_encoder(self.enc_simple_embedding(src))
+        else:
+            # opt2:
+            emb = self.enc_data_embedding(src, x_mark_enc)
 
         enc_out, attns = self.encoder(emb, attn_mask=enc_self_mask)
 
@@ -116,10 +127,96 @@ class InformerEncoder(nn.Module):
             '-inf')).masked_fill(mask == 1, float(0.0))
         return mask
 
+# --- ---
+# FULL MODEL
+# model.py
+# --- ---
+
+
+class Informer(nn.Module):
+    def __init__(self, loss_type, enc_in, dec_in, c_out, out_len,
+                 factor=5, d_model=512, n_heads=8, e_layers=3, d_layers=2, d_ff=512,
+                 dropout=0.0, attn='prob', embed='fixed', freq='h', activation='gelu',
+                 output_attention=False, distil=True, mix=True):
+        super(Informer, self).__init__()
+        self.pred_len = out_len
+        self.attn = attn
+        self.output_attention = output_attention
+
+        # Encoding
+        self.enc_embedding = DataEmbedding(
+            enc_in, d_model, embed, freq, dropout)
+        self.dec_embedding = DataEmbedding(
+            dec_in, d_model, embed, freq, dropout)
+        # Attention
+        Attn = ProbAttention if attn == 'prob' else FullAttention
+        # Encoder
+        self.encoder = Encoder(
+            [
+                EncoderLayer(
+                    AttentionLayer(Attn(False, factor, attention_dropout=dropout, output_attention=output_attention),
+                                   d_model, n_heads, mix=False),
+                    d_model,
+                    d_ff,
+                    dropout=dropout,
+                    activation=activation
+                ) for l in range(e_layers)
+            ],
+            [
+                ConvLayer(
+                    d_model
+                ) for l in range(e_layers-1)
+            ] if distil else None,
+            norm_layer=torch.nn.LayerNorm(d_model)
+        )
+        # Decoder
+        self.decoder = Decoder(
+            [
+                DecoderLayer(
+                    AttentionLayer(Attn(True, factor, attention_dropout=dropout, output_attention=False),
+                                   d_model, n_heads, mix=mix),
+                    AttentionLayer(FullAttention(False, factor, attention_dropout=dropout, output_attention=False),
+                                   d_model, n_heads, mix=False),
+                    d_model,
+                    d_ff,
+                    dropout=dropout,
+                    activation=activation,
+                )
+                for l in range(d_layers)
+            ],
+            norm_layer=torch.nn.LayerNorm(d_model)
+        )
+        # self.end_conv1 = nn.Conv1d(in_channels=label_len+out_len, out_channels=out_len, kernel_size=1, bias=True)
+        # self.end_conv2 = nn.Conv1d(in_channels=d_model, out_channels=c_out, kernel_size=1, bias=True)
+        self.projection = nn.Linear(d_model, c_out, bias=True)
+
+        # SVEN
+        self.output_fn = LossHelper.get_output_activation(loss_type)
+
+    def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec,
+                enc_self_mask=None, dec_self_mask=None, dec_enc_mask=None):
+        enc_out = self.enc_embedding(x_enc, x_mark_enc)
+        enc_out, attns = self.encoder(enc_out, attn_mask=enc_self_mask)
+
+        dec_out = self.dec_embedding(x_dec, x_mark_dec)
+        dec_out = self.decoder(
+            dec_out, enc_out, x_mask=dec_self_mask, cross_mask=dec_enc_mask)
+        dec_out = self.projection(dec_out)
+
+        # SVEN
+        out = self.output_fn(dec_out)
+
+        # dec_out = self.end_conv1(dec_out)
+        # dec_out = self.end_conv2(dec_out.transpose(2,1)).transpose(1,2)
+        if self.output_attention:
+            return out[:, -self.pred_len:, :], attns
+        else:
+            return out[:, -self.pred_len:, :]  # [B, L, D]
 
 # --- ---
 # encoder.py
 # --- ---
+
 
 class ConvLayer(nn.Module):
     def __init__(self, c_in):
@@ -222,6 +319,62 @@ class EncoderStack(nn.Module):
         x_stack = torch.cat(x_stack, -2)
 
         return x_stack, attns
+
+# --- ---
+# decoder.py
+# --- ---
+
+
+class DecoderLayer(nn.Module):
+    def __init__(self, self_attention, cross_attention, d_model, d_ff=None,
+                 dropout=0.1, activation="relu"):
+        super(DecoderLayer, self).__init__()
+        d_ff = d_ff or 4*d_model
+        self.self_attention = self_attention
+        self.cross_attention = cross_attention
+        self.conv1 = nn.Conv1d(in_channels=d_model,
+                               out_channels=d_ff, kernel_size=1)
+        self.conv2 = nn.Conv1d(
+            in_channels=d_ff, out_channels=d_model, kernel_size=1)
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+        self.norm3 = nn.LayerNorm(d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.activation = F.relu if activation == "relu" else F.gelu
+
+    def forward(self, x, cross, x_mask=None, cross_mask=None):
+        x = x + self.dropout(self.self_attention(
+            x, x, x,
+            attn_mask=x_mask
+        )[0])
+        x = self.norm1(x)
+
+        x = x + self.dropout(self.cross_attention(
+            x, cross, cross,
+            attn_mask=cross_mask
+        )[0])
+
+        y = x = self.norm2(x)
+        y = self.dropout(self.activation(self.conv1(y.transpose(-1, 1))))
+        y = self.dropout(self.conv2(y).transpose(-1, 1))
+
+        return self.norm3(x+y)
+
+
+class Decoder(nn.Module):
+    def __init__(self, layers, norm_layer=None):
+        super(Decoder, self).__init__()
+        self.layers = nn.ModuleList(layers)
+        self.norm = norm_layer
+
+    def forward(self, x, cross, x_mask=None, cross_mask=None):
+        for layer in self.layers:
+            x = layer(x, cross, x_mask=x_mask, cross_mask=cross_mask)
+
+        if self.norm is not None:
+            x = self.norm(x)
+
+        return x
 
 # --- ---
 # embed.py

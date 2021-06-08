@@ -18,14 +18,17 @@ HPARAMS: [
     step: [63],
     # training
     epochs: [300],
-    lr: [0.01, 0.001],
-    batch_size: [64, 128, 256],
-    dropout: [0, 0.1, 0.3],
+    lr: [0.01],
+    batch_size: [128],
+    dropout: [0.1, 0.3, 0.5, 0.7],
     patience: 25,
-    max_grad_norm: [1, 0.1],
+    max_grad_norm: [0.5],
     # architecture specific
-    arch: 'lstm',
-    n_layer: [1],
-    d_hidden: [10, 30, 80]
+    arch: 'informer',
+    # model hyperparams
+    d_model: [4, 20, 40, 60, 80],
+    n_head: [4],
+    n_layer: [1, 2],
+    d_hidden_factor: [1, 2, 4], # replace with a factor
   }
 ]

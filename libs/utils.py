@@ -258,3 +258,19 @@ class EarlyStopping:
                     f'>> Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
             pickle.dump(dict, open(self.path, 'wb'))
             self.val_loss_min = val_loss
+
+# --- --- ---
+# --- --- ---
+
+# See https://github.com/aparo/pyes/issues/183
+
+
+class DotDict(dict):
+    def __getattr__(self, attr):
+        if attr.startswith('__'):
+            raise AttributeError
+        return self.get(attr, None)
+
+    __setattr__ = dict.__setitem__
+
+    __delattr__ = dict.__delitem__

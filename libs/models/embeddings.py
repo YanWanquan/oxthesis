@@ -23,8 +23,10 @@ class SimplePositionalEncoding(nn.Module):
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(torch.arange(
             0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
+
         pe = pe.unsqueeze(0).transpose(0, 1)
         self.register_buffer('pe', pe)  # exclude from model's paramters
 
@@ -126,7 +128,7 @@ class TemporalEmbedding(nn.Module):
         day_x = self.day_embed(x[:, :, 1])
         month_x = self.month_embed(x[:, :, 0])
 
-        return hour_x + weekday_x + day_x + month_x + minute_x
+        return minute_x + hour_x + weekday_x + day_x + month_x
 
 
 class TimeFeatureEmbedding(nn.Module):
@@ -143,10 +145,16 @@ class TimeFeatureEmbedding(nn.Module):
 
 
 class DataEmbedding(nn.Module):
-    def __init__(self, c_in, d_model, embed_type='fixed', freq='h', dropout=0.1):
+    def __init__(self, c_in, d_model, embed_type='fixed', freq='d', dropout=0.1, only_encoder=False):
         super(DataEmbedding, self).__init__()
+        self.only_encoder = only_encoder
 
-        self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
+        # SVEN
+        if self.only_encoder:
+            self.value_embedding = nn.Linear(c_in, d_model)
+        else:
+            self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
+
         self.position_embedding = PositionalEmbedding(d_model=d_model)
         self.temporal_embedding = TemporalEmbedding(d_model=d_model, embed_type=embed_type, freq=freq) if embed_type != 'timeF' else TimeFeatureEmbedding(
             d_model=d_model, embed_type=embed_type, freq=freq)
@@ -154,7 +162,12 @@ class DataEmbedding(nn.Module):
         self.dropout = nn.Dropout(p=dropout)
 
     def forward(self, x, x_mark):
-        x = self.value_embedding(
-            x) + self.position_embedding(x) + self.temporal_embedding(x_mark)
+        # SVEN
+        if not self.only_encoder:
+            x = self.value_embedding(
+                x_mark) + self.position_embedding(x_mark) + self.temporal_embedding(x_mark)
+        else:
+            x = self.value_embedding(
+                x) + self.position_embedding(x) + self.temporal_embedding(x_mark)
 
         return self.dropout(x)

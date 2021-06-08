@@ -3,6 +3,8 @@
 # Sven Giegerich / 03.05.2021
 # --- --- ---
 
+from math import e
+import os
 from operator import mod
 from datetime import datetime, timedelta
 from sys import platform
@@ -15,6 +17,7 @@ import numpy as np
 import pandas as pd
 from runx.logx import logx
 import pickle
+from sklearn.model_selection import ParameterSampler
 # utils
 import libs.utils as utils
 from libs.losses import LossHelper, LossTypes
@@ -29,7 +32,7 @@ from libs.models.transformer import TransformerEncoder
 from libs.models.conv_transformer import ConvTransformerEncoder
 from libs.models.lstm_dropout import LSTM
 from libs.losses import LossTypes, LossHelper
-from libs.models.informer import InformerEncoder
+from libs.models.informer import InformerEncoder, Informer
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -37,13 +40,50 @@ train_archs = {
     'transformer': TransformerEncoder,
     'lstm': LSTM,
     'conv_transformer': ConvTransformerEncoder,
-    'informer': InformerEncoder
+    'informer': InformerEncoder,
+    'informer_full': Informer
 }
 
 # torch.manual_seed(0)
 
 # --- --- ---
 # --- --- ---
+
+hyper_grid = {
+    'lstm': {
+        'batch_size': [64, 128, 254],
+        'lr': [1, 0.1, 0.01, 0.001, 0.0001],
+        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        # ----
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'd_hidden': [5, 10, 20, 40, 80]
+    },
+    'informer': {
+        'batch_size': [64, 128],
+        'lr': [0.1, 0.01, 0.001],
+        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        # ---
+        'attn': ['prob', 'full'],
+        # 'embed_type': ['fixed', 'timeF'],
+        'embed_type': ['simple'],
+        'n_layer': [1, 2],
+        'n_head': [2, 4, 8],
+        'd_model': [8, 16, 32, 64, 128],
+        'd_hidden_factor': [1, 2, 4],
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
+    },
+    'transformer': {
+        'batch_size': [64, 128],
+        'lr': [0.1, 0.01, 0.001],
+        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        # ---
+        'd_model': [8, 16, 32, 64, 128],
+        'n_head': [2, 4, 8],
+        'n_layer': [1, 2],
+        'd_hidden_factor': [1, 2, 4],
+        'dropout': [0.1, 0.3, 0.5, 0.7],
+    }
+}
 
 
 def get_args():
@@ -66,6 +106,8 @@ def get_args():
         train_archs.keys()), default="transformer", help="Learning architecture")
     parser.add_argument('--loss_type', type=str, nargs='?', choices=list(
         loss_dict.keys()), default="sharpe", help="Loss function")
+    parser.add_argument('--random_search_len', type=int, default=None,
+                        help="Run the hyperparam inside the expanding window? Also specifiy --logdir")
     # data ----
     parser.add_argument('--filename', type=str, nargs='?',
                         default="futures_prop.csv", help="Filename of corresponding .csv-file")
@@ -117,6 +159,18 @@ def get_args():
     # .. convolutional transformer
     parser.add_argument('--conv_len', type=int, nargs='?',
                         default=1, help="ConvTransformer: kernel size for query-key pair")
+    # .. informer
+    parser.add_argument('--attn', type=str, nargs='?', choices=['prob', 'full'],
+                        default='prob', help="Informer: choose attention mechanism")
+    parser.add_argument('--embed_type', type=str, nargs='?', choices=['fixed', 'timeF', 'simple'],
+                        default='fixed', help="Informer: choose embedding layer")
+    parser.add_argument('--factor', type=int, nargs='?',
+                        default=5, help="Informer: sampling factor for prob attn")
+    # .. informer full
+    parser.add_argument('--pred_len', type=int, nargs='?',
+                        default=63, help="Full Informer: prediction length")
+    parser.add_argument('--label_len', type=int, nargs='?',
+                        default=63, help="Full Informer: label length for decoder")
 
     args = parser.parse_args()
     return args
@@ -137,13 +191,57 @@ def main():
             args.test_date) + pd.offsets.DateOffset(years=args.test_win)
         args.do_log = False  # runx works just for one model per experiment
 
+        val_loss = {}
         test_loss = {}
+        best_settings = {}
+        checkpoints = {}
         wins_len = []
         while args.test_date < args.stop_date:
-            test_loss[args.test_date], setting = run_training_window(args)
+
+            if args.random_search_len:
+                args_dict = vars(args)
+                checkpoints[args.test_date] = []
+
+                # sample parameters randomly ----
+                rng = np.random.RandomState(0)
+                param_list = list(ParameterSampler(
+                    hyper_grid[args.arch], n_iter=args.random_search_len, random_state=rng))
+
+                # run random search ----
+                search_best_score = np.Inf
+                for i in range(args.random_search_len):
+
+                    # update args ----
+                    params = param_list[i]
+                    for param, value in params.items():
+                        args_dict[param] = value
+                    args_dict = utils.DotDict(args_dict)
+
+                    # run window ----
+                    val_loss_i, test_loss_i, setting_i, checkpoint_i = run_training_window(
+                        args_dict)
+                    checkpoints[args.test_date].append(checkpoint_i)
+
+                    if val_loss_i < search_best_score:
+                        print(
+                            f"\n> Found better hyperparams ({search_best_score:.6f} --> {val_loss_i:.6f}): {setting_i}")
+                        search_best_score = val_loss_i
+                        search_best_checkpoint = checkpoint_i
+                        val_loss[args.test_date], test_loss[args.test_date], best_settings[args.test_date] = (
+                            val_loss_i, test_loss_i, setting_i)
+
+                # clean all checkpoints except best one
+                for file in checkpoints[args.test_date]:
+                    if file != search_best_checkpoint:
+                        os.remove(file)
+
+            else:
+                val_loss[args.test_date], test_loss[args.test_date], best_settings[args.test_date], _ = run_training_window(
+                    args)
+
+            # update expanding window
             wins_len.append((args.end_date - args.test_date) /
                             timedelta(days=365))
-
             args.test_date = pd.to_datetime(
                 args.test_date) + pd.offsets.DateOffset(years=args.test_win)
             args.end_date = pd.to_datetime(
@@ -151,16 +249,34 @@ def main():
             if args.end_date > args.stop_date:
                 args.end_date = args.stop_date
 
+        val_mean = np.average(list(val_loss.values()), weights=wins_len)
         test_mean = np.average(list(test_loss.values()), weights=wins_len)
-        pd.Series(test_loss, name=setting).to_csv(args.logdir +
-                                                  f"/exp_win_test_loss_m-{test_mean}.csv")
+
+        df_results = pd.DataFrame({
+            'val_loss': val_loss,
+            'test_loss': test_loss,
+            'best_settings': best_settings
+        })
+        df_results.index.name = "window"
+        df_results.to_csv(
+            args.logdir + f"/exp-win_random_arch-{args.arch}_-vl-{val_mean:.6f}_tl-{test_mean:.6f}.csv")
+
+        # pd.Series(val_loss, name=setting).to_csv(args.logdir +
+        #                                          f"/exp_win_val_loss_m-{val_mean}.csv")
+        # pd.Series(test_loss, name=setting).to_csv(args.logdir +
+        #                                           f"/exp_win_test_loss_m-{test_mean}.csv")
+        # pd.Series(best_settings, name="random_search").to_csv(args.logdir +
+        #                                                       f"/exp_win_best_random_search.csv")
+        print("\nEnd of expanding window training")
+        print(
+            f"> Finished expanding window training \t val loss: {val_mean}")
         print(
             f"> Finished expanding window training \t test loss: {test_mean}")
     elif args.test_date is not None:
         print("> Start single window training")
         args.do_log = True
 
-        test_loss, setting = run_training_window(args)
+        val_loss, test_loss, setting, checkpoint = run_training_window(args)
     else:
         raise ValueError("Either test_win_len or test_date needs to be set!")
 
@@ -169,7 +285,7 @@ def main():
 
 
 def run_training_window(args):
-    print(f"\n\n> Train with test date {args.test_date}")
+    print(f"\n> Train with test date {args.test_date}")
 
     if args.logdir is not None and args.do_log:
         args_log = args  # runx cann't deal with pd.DateTime objects
@@ -214,7 +330,7 @@ def run_training_window(args):
     loss_type = LossHelper.get_loss_type(args.loss_type)
     train_manager = {
         # args
-        'args': vars(args),
+        'args': args if type(args) == utils.DotDict else vars(args),
         # loss
         'loss_label': args.loss_type,
         'loss_type': loss_type,
@@ -280,21 +396,41 @@ def run_training_window(args):
         model = LSTM(d_input=d_input, d_output=d_output,
                      d_hidden=args.d_hidden, n_layer=args.n_layer, dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
         args.d_hidden = args.d_hidden[0]
-    elif args.arch == 'informer':
+    elif args.arch == 'informer' or args.arch == 'informer_full':
         # tmp: at the moment no hyperparamter
         freq = 'd'  # daily
-        factor = 5  # factor to sample for prob attention
+        factor = args.factor  # factor to sample for prob attention
         d_ff = args.d_model
-        attn = 'full'  # 'full' or 'prob'
-        embed = 'fixed'  # could be changed to learnable
+        attn = args.attn  # 'full' or 'prob'
+        embed_type = args.embed_type  # could be changed to learnable
         # if n_layer > 1: each succ layer will be reduced by 2
-        do_distil = False  # tmp! check again if adoptable?!
+        do_distil = False
         output_attention = True
         win_len = args.win_len
-        model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor,
-                                loss_type=train_manager['loss_type'], d_model=args.d_model, n_heads=args.n_head,
-                                e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed=embed,
-                                freq=freq, output_attention=output_attention, distil=do_distil, win_len=win_len)
+
+        if attn == 'full':
+            print("> Sampling factor not effective in combination with full attention")
+
+        if args.arch == 'informer':
+            model = InformerEncoder(enc_in=d_input, c_out=d_output, factor=factor,
+                                    loss_type=train_manager['loss_type'], d_model=args.d_model, n_heads=args.n_head,
+                                    e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed_type=embed_type,
+                                    freq=freq, output_attention=output_attention, distil=do_distil, win_len=win_len)
+        elif args.arch == 'informer_full':
+            dec_in = 63 + args.step
+            c_out = d_output  # ?!
+            out_len = args.pred_len
+            d_layers = 1
+            do_distil = True
+
+            model = Informer(loss_type=train_manager['loss_type'], enc_in=d_input, dec_in=dec_in, c_out=c_out, out_len=out_len, factor=factor, d_model=args.d_model, n_heads=args.n_head,
+                             e_layers=args.n_layer, d_layers=d_layers, d_ff=d_ff, dropout=args.dropout, attn=attn, embed=embed_type,
+                             freq=freq, output_attention=output_attention, distil=do_distil
+                             )
+
+            raise NotImplementedError("Need to code input first!")
+        else:
+            raise ValueError()
     else:
         raise NotImplementedError("Architecture not implemented yet.")
 
@@ -310,23 +446,28 @@ def run_training_window(args):
     if model.name == 'conv_transformer':
         train_manager['setting'] = train_manager['setting'] + \
             '_ql-{}'.format(args_conv_transf['q_len'])
+    if model.name == 'informer' or model.name == 'informer_full':
+        train_manager['setting'] = train_manager['setting'] + \
+            '_attn-{}_embed-{}_factor-{}'.format(
+                args.attn, args.embed_type, args.factor)
     if args.do_log:
         logx.msg(f"Setting: {train_manager['setting']}")
     else:
         print(f"Setting: {train_manager['setting']}")
 
-    best_checkpoint_path = train(model=model, train_iter=train_dataloader,
-                                 val_iter=val_dataloader, train_manager=train_manager, do_log=args.do_log)
+    best_checkpoint_path, val_loss = train(model=model, train_iter=train_dataloader,
+                                           val_iter=val_dataloader, train_manager=train_manager, do_log=args.do_log)
     print("--- --- ---")
 
     # (5) test model ----
     _, model, train_manager = utils.load_model(path=best_checkpoint_path)
     test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
                               train_manager=train_manager, do_log=False)
+    print(f">> Val loss: {val_loss}")
     print(f">> Test loss: {test_loss}")
 
     print("(6) Finished training")
-    return (test_loss, train_manager['setting'])
+    return (val_loss, test_loss, train_manager['setting'], best_checkpoint_path)
 
 
 def train(model, train_iter, val_iter, train_manager, do_log=False):
@@ -392,7 +533,8 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
             print(f"> Early stopping")
             break
 
-    return early_stopping.path
+    best_val_loss = -early_stopping.best_score
+    return (early_stopping.path, best_val_loss)
 
 
 def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
@@ -412,15 +554,37 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
 
         # time embedding?
         if model.name == 'informer':
-            time_embd = batch['time_embd'].double().to(device)
-            prediction = model(inputs, time_embd)
+            inputs_time_embd = batch['time_embd'].double().to(device)
+            prediction = model(inputs, inputs_time_embd)
+        elif model.name == 'informer_full':
+            dec_returns = batch['dec_in'].double()
 
-            if len(prediction) > 1:
-                # returns also the attention
-                prediction = prediction[0]
+            # tmp!
+            train_manager['args']['padding'] = 0  # or 1
+
+            # decoder input ----
+            if train_manager['args']['padding'] == 0:
+                dec_inp = torch.zeros(
+                    [returns.shape[0], train_manager['args']['pred_len'], returns.shape[-1]])
+            elif train_manager['args']['padding'] == 0:
+                dec_inp = torch.ones(
+                    [returns.shape[0], train_manager['args']['pred_len'], returns.shape[-1]])
+            dec_inp = dec_inp.double()
+            dec_inp = torch.cat(
+                [returns[:, :train_manager['args']['label_len'], :], dec_inp], dim=1)
+            dec_inp = dec_inp.to(device)
+
+            # embedding ----
+            enc_time_embd = batch['time_embd'].double().to(device)
+            dec_time_embd = batch['time_embd'].double().to(device)  # ?!
+
+            prediction = model(inputs, enc_time_embd, dec_inp, dec_time_embd)
+            pass
         else:
             prediction = model(inputs)
 
+        if len(prediction) > 1:
+            prediction = prediction[0]  # (pred, attns)
         if LossHelper.use_returns_for_loss(train_manager['loss_type']):
             loss = loss_fn(prediction, returns,
                            freq=train_manager['frequency'])
