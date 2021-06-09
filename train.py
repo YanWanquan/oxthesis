@@ -199,27 +199,27 @@ def main():
         while args.test_date < args.stop_date:
 
             if args.random_search_len:
-                args_dict = vars(args)
+                args_dict_raw = vars(args)
                 checkpoints[args.test_date] = []
 
                 # sample parameters randomly ----
-                rng = np.random.RandomState(0)
                 param_list = list(ParameterSampler(
-                    hyper_grid[args.arch], n_iter=args.random_search_len, random_state=rng))
+                    hyper_grid[args.arch], n_iter=args.random_search_len))
 
                 # run random search ----
                 search_best_score = np.Inf
                 for i in range(args.random_search_len):
 
                     # update args ----
+                    args_dict_i = args_dict_raw
                     params = param_list[i]
                     for param, value in params.items():
-                        args_dict[param] = value
-                    args_dict = utils.DotDict(args_dict)
+                        args_dict_i[param] = value
+                    args_dict_i = utils.DotDict(args_dict_i)
 
                     # run window ----
                     val_loss_i, test_loss_i, setting_i, checkpoint_i = run_training_window(
-                        args_dict)
+                        args_dict_i)
                     checkpoints[args.test_date].append(checkpoint_i)
 
                     if val_loss_i < search_best_score:
@@ -555,8 +555,9 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         # time embedding?
         if model.name == 'informer':
             inputs_time_embd = batch['time_embd'].double().to(device)
-            prediction = model(inputs, inputs_time_embd)
+            prediction, attns = model(inputs, inputs_time_embd)
         elif model.name == 'informer_full':
+            raise ValueError('Go away! Yet..')
             dec_returns = batch['dec_in'].double()
 
             # tmp!
@@ -578,13 +579,12 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             enc_time_embd = batch['time_embd'].double().to(device)
             dec_time_embd = batch['time_embd'].double().to(device)  # ?!
 
-            prediction = model(inputs, enc_time_embd, dec_inp, dec_time_embd)
+            prediction, attns = model(
+                inputs, enc_time_embd, dec_inp, dec_time_embd)
             pass
         else:
             prediction = model(inputs)
 
-        if len(prediction) > 1:
-            prediction = prediction[0]  # (pred, attns)
         if LossHelper.use_returns_for_loss(train_manager['loss_type']):
             loss = loss_fn(prediction, returns,
                            freq=train_manager['frequency'])
@@ -605,7 +605,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
                 writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
                 logx.add_scalar(writer_path, loss, epoch_i *
                                 len(train_iter) + i)
-            print_msg = f">> Train Epoch {epoch_i}\t batch {i}\t train loss: {loss}"
+            print_msg = f">> Train Epoch {epoch_i+1}\t batch {i}\t train loss: {loss}"
             if do_log:
                 logx.msg(print_msg)
             else:
