@@ -47,6 +47,16 @@ def calc_captured_return(pred_position, returns_scaled_lead):
     return pred_position * returns_scaled_lead
 
 
+def calc_avg_returns(returns, scale=252):
+    """returns (pd.DataFrame)"""
+    return -returns.mean() * scale
+
+
+def calc_sharpe(returns, scale=252):
+    """returns (pd.DataFrame)"""
+    return -returns.mean() / returns.std() * np.sqrt(scale)
+
+
 class LossHelper:
 
     @staticmethod
@@ -68,6 +78,13 @@ class LossHelper:
             LossTypes.AVG_RETURNS: calc_loss_avg_returns,
             LossTypes.SHARPE: calc_loss_sharpe,
             LossTypes.MSE: torch.nn.MSELoss()
+        }[loss_type]
+
+    @staticmethod
+    def get_strategy_loss_function(loss_type):
+        return {
+            LossTypes.AVG_RETURNS: calc_avg_returns,
+            LossTypes.SHARPE: calc_sharpe
         }[loss_type]
 
     @staticmethod

@@ -23,7 +23,7 @@ import libs.utils as utils
 from libs.losses import LossHelper, LossTypes
 from libs.models.informer import time_features
 # eval
-from evaluate import evaluate_model
+import evaluate
 # data
 from libs.data_loader import BaseDataLoader, DataTypes
 from libs.futures_dataset import FuturesDataset
@@ -106,6 +106,8 @@ def get_args():
         train_archs.keys()), default="transformer", help="Learning architecture")
     parser.add_argument('--loss_type', type=str, nargs='?', choices=list(
         loss_dict.keys()), default="sharpe", help="Loss function")
+    parser.add_argument('--eval_strategy', type=bool, default=False,
+                        help="Either evaluate and early stop by batch loss (False) or strategy loss (True)")
     parser.add_argument('--random_search_len', type=int, default=None,
                         help="Run the hyperparam inside the expanding window? Also specifiy --logdir")
     # data ----
@@ -261,12 +263,6 @@ def main():
         df_results.to_csv(
             args.logdir + f"/exp-win_random_arch-{args.arch}_-vl-{val_mean:.6f}_tl-{test_mean:.6f}.csv")
 
-        # pd.Series(val_loss, name=setting).to_csv(args.logdir +
-        #                                          f"/exp_win_val_loss_m-{val_mean}.csv")
-        # pd.Series(test_loss, name=setting).to_csv(args.logdir +
-        #                                           f"/exp_win_test_loss_m-{test_mean}.csv")
-        # pd.Series(best_settings, name="random_search").to_csv(args.logdir +
-        #                                                       f"/exp_win_best_random_search.csv")
         print("\nEnd of expanding window training")
         print(
             f"> Finished expanding window training \t val loss: {val_mean}")
@@ -456,21 +452,27 @@ def run_training_window(args):
         print(f"Setting: {train_manager['setting']}")
 
     best_checkpoint_path, val_loss = train(model=model, train_iter=train_dataloader,
-                                           val_iter=val_dataloader, train_manager=train_manager, do_log=args.do_log)
+                                           val_iter=val_dataloader, train_manager=train_manager,
+                                           do_log=args.do_log, val_df=base_loader.df[DataTypes.VAL])
     print("--- --- ---")
 
     # (5) test model ----
     _, model, train_manager = utils.load_model(path=best_checkpoint_path)
-    test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
-                              train_manager=train_manager, do_log=False)
-    print(f">> Val loss: {val_loss}")
-    print(f">> Test loss: {test_loss}")
+
+    if train_manager['args']['eval_strategy']:
+        test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
+                                  train_manager=train_manager, do_log=False, do_strategy=True, base_df=base_loader.df[DataTypes.TEST])
+    else:
+        test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
+                                  train_manager=train_manager, do_log=False)
+    print(f">> Val loss: {val_loss:.6f}")
+    print(f">> Test loss: {test_loss:.6f}")
 
     print("(6) Finished training")
     return (val_loss, test_loss, train_manager['setting'], best_checkpoint_path)
 
 
-def train(model, train_iter, val_iter, train_manager, do_log=False):
+def train(model, train_iter, val_iter, train_manager, do_log=False, val_df=None):
     model = model.to(device).double()
     best_val_score = np.inf
 
@@ -487,20 +489,24 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
     for epoch_i in range(train_manager['epochs']):
         epoch_loss = run_epoch(
             model=model, train_iter=train_iter, train_manager=train_manager, epoch_i=epoch_i, do_log=do_log)
+
         val_loss = evaluate_iter(
             model=model, data_iter=val_iter, train_manager=train_manager)
+        val_str_loss = evaluate_iter(
+            model=model, data_iter=val_iter, train_manager=train_manager, do_strategy=True, base_df=val_df)
 
         if val_loss < best_val_score:
             best_val_score = val_loss
 
         # verb ----
-        epoch_print = f">> Train Epoch {epoch_i + 1}\t -- avg --\t train loss: {epoch_loss}\t val loss: {val_loss}"
+        epoch_print = f">> Train Epoch {epoch_i + 1}\t -- avg --\t train batch loss: {epoch_loss:.6f}\t val batch loss: {val_loss:.6f} \t  val strategy loss: {val_str_loss:.6f}"
         if do_log:
             logx.msg(epoch_print)
             logx.add_scalar("Loss/val", val_loss, epoch_i)
 
             metrics_train = {'loss': epoch_loss}
             metrics_val = {'loss': val_loss}
+            # to be extented
             logx.metric(phase='train', metrics=metrics_train,
                         epoch=epoch_i + 1)
             logx.metric(phase='val', metrics=metrics_val,
@@ -524,11 +530,16 @@ def train(model, train_iter, val_iter, train_manager, do_log=False):
         pickle.dump(save_dict, open(checkpoint_path, 'wb'))
 
         # early stopping ----
-        early_stopping(val_loss, model)
+        if train_manager['args']['eval_strategy']:
+            checkpoint_loss = val_str_loss
+        else:
+            checkpoint_loss = val_loss
+
+        early_stopping(checkpoint_loss, model)
 
         if early_stopping.do_save_model:
             early_stopping.save_checkpoint(
-                val_loss=val_loss, dict=save_dict)
+                val_loss=checkpoint_loss, dict=save_dict)
         if early_stopping.early_stop:
             print(f"> Early stopping")
             break
@@ -605,7 +616,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
                 writer_path = f"Loss/train/{train_manager['loss_label']}/{train_manager['year_test']}"
                 logx.add_scalar(writer_path, loss, epoch_i *
                                 len(train_iter) + i)
-            print_msg = f">> Train Epoch {epoch_i+1}\t batch {i}\t train loss: {loss}"
+            print_msg = f">> Train Epoch {epoch_i+1}\t batch {i}\t train batch loss: {loss:.6f}"
             if do_log:
                 logx.msg(print_msg)
             else:
@@ -615,9 +626,29 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
     return mean_loss_epoch
 
 
-def evaluate_iter(model, data_iter, train_manager, do_log=False):
-    return evaluate_model(model, data_iter, train_manager, do_log=do_log)
+def evaluate_iter(model, data_iter, train_manager, do_strategy=True, base_df=None, do_log=False):
+    if do_strategy and base_df is not None:
+        # strategy loss ----
+        df_skeleton = base_df.swaplevel(axis=1)['prs']
+        scaled_rts = base_df.xs('rts_scaled', axis=1,
+                                level=1, drop_level=True)
 
+        predictions = evaluate.calc_predictions_df(model, data_iter, df_shape=df_skeleton.shape,
+                                                   df_index=df_skeleton.index, df_insts=df_skeleton.columns,
+                                                   win_step=train_manager['args']['win_len'], scaler=train_manager['args']['scaler'], loss_type=train_manager['loss_type'])
+        positions = evaluate.calc_position_df(
+            predictions, train_manager['loss_type'])
+        str_returns = utils.calc_strategy_returns(
+            positions=positions, realized_returns=scaled_rts, aggregate_by='time', lead=1)
+
+        loss_fn = LossHelper.get_strategy_loss_function(
+            train_manager['loss_type'])
+        str_loss = loss_fn(str_returns)
+
+        return str_loss
+    else:
+        # batch loss ----
+        return evaluate.evaluate_model(model, data_iter, train_manager, do_log=do_log)
 
 # --- --- ---
 # --- --- ---

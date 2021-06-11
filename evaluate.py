@@ -296,7 +296,8 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
             df=predictions_df, scaler_dict=scaler)
 
     # for verification
-    count_df.to_csv("count_tmp.csv")
+    # count_df.to_csv("count_tmp.csv")
+
     return predictions_df
 
 
