@@ -75,3 +75,27 @@ class TransformerEncoder(nn.Module):
         mask = mask.float().masked_fill(mask == 0, float(
             '-inf')).masked_fill(mask == 1, float(0.0))
         return mask
+
+    def get_attention(self, src, src_mask=None):
+        # currently self_attn just returns the output of multi-head attn..
+        # ... and not the heads separately
+        # TBD
+
+        src = src.permute(1, 0, 2)
+
+        if src_mask is None:
+            src_mask = self.src_mask
+
+        emb = self.pos_encoder(self.embedding(src))
+
+        attention_layers = []
+        for layer in self.encoder.layers:
+            attn_l = layer.self_attn(
+                emb, emb, emb, attn_mask=src_mask)
+            attention_layers.append(attn_l[1])
+
+        attn = torch.cat(attention_layers)
+        if len(attention_layers) == 1:
+            attn = attn.unsqueeze(0)
+        attn = attn.permute(1, 0, 2, 3)
+        return attn  # B x n_layer x L x L

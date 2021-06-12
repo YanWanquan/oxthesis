@@ -74,15 +74,28 @@ hyper_grid = {
     },
     'transformer': {
         'batch_size': [64, 128],
-        'lr': [0.1, 0.01, 0.001],
+        'lr': [0.1, 0.01, 0.001, 0.0001],
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
         'd_model': [8, 16, 32, 64, 128],
-        'n_head': [2, 4, 8],
-        'n_layer': [1, 2],
+        'n_head': [1, 2, 4, 8],
+        'n_layer': [1, 2, 3],
         'd_hidden_factor': [1, 2, 4],
-        'dropout': [0.1, 0.3, 0.5, 0.7],
-    }
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5, 0.7],
+    },
+    'conv_transformer': {
+        'batch_size': [64, 128],
+        'lr': [0.1, 0.01, 0.001, 0.0001],
+        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        # ---
+        'd_model': [8, 16, 32, 64, 128],
+        'n_head': [1, 2, 4, 8],
+        'n_layer': [1, 2, 3],
+        'd_hidden_factor': [1, 2, 4],
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5, 0.7],
+        # ---
+        'conv_len': [1, 3, 6, 9]
+    },
 }
 
 
@@ -106,7 +119,7 @@ def get_args():
         train_archs.keys()), default="transformer", help="Learning architecture")
     parser.add_argument('--loss_type', type=str, nargs='?', choices=list(
         loss_dict.keys()), default="sharpe", help="Loss function")
-    parser.add_argument('--eval_strategy', type=bool, default=False,
+    parser.add_argument('--eval_strategy', type=bool, default=True,
                         help="Either evaluate and early stop by batch loss (False) or strategy loss (True)")
     parser.add_argument('--random_search_len', type=int, default=None,
                         help="Run the hyperparam inside the expanding window? Also specifiy --logdir")

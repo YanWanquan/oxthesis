@@ -160,6 +160,10 @@ class BaseDataLoader:
         covariates_dict['trg'] = covariates_dict['rts_scaled'].shift(
             -lead_target)
 
+        # plottings
+        covariates_dict['prs_lead'] = covariates_dict['prs'].shift(
+            -lead_target)
+
         # concatenate all single df's to a multindex df:
         #   instruments (first level), covariates (second level), time (axis 0)
         df = pd.concat(covariates_dict.values(), axis=1,

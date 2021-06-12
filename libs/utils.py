@@ -118,9 +118,9 @@ def calc_strategy_returns(positions, realized_returns, aggregate_by=None, lead=1
     str_rts = positions * realized_returns.shift(-lead)
 
     if aggregate_by == 'instrument':
-        return str_rts.mean(axis=0)
+        return str_rts.mean(axis=0, skipna=True)
     elif aggregate_by == 'time':
-        return str_rts.mean(axis=1)
+        return str_rts.mean(axis=1, skipna=True)
     else:
         return str_rts
 
