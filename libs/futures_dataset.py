@@ -31,7 +31,7 @@ class FuturesDataset(Dataset):
                 'daily_rts']
     TRG_COLS = ['trg']
     RTS_COLS = ['rts_scaled_lead']
-    PRS_COLS = ['prs']
+    PRS_COLS = ['prs', 'prs_lead']
 
     def __init__(self, dataloader, dat_type, win_size, tau, step, scaler_type=None, scaler=None, freq="d"):
         """
@@ -202,7 +202,7 @@ class FuturesDataset(Dataset):
             'inst': self.inst_index.iloc[idx].tolist()[1],  # len: B (list)
             # additional vars for plotting
             'rts': self.data[idx, :, self.rts_indexes],
-            'prs': self.data[idx, :, self.prs_indexes]
+            'prs': self.data[idx, :, self.prs_indexes]  # prs, prs_lead
         }
 
     def plot_example(self, id, model=None, loss_type=None, scaler="none"):
@@ -241,8 +241,12 @@ class FuturesDataset(Dataset):
                         # returns also the attention
                         attn = pred[1]
                         pred = pred[0]
+                elif model.name == 'transformer':
+                    pred = model(inp, emb)
+                    attn = model.get_attention(inp)[0, :, :, :]
                 else:
                     pred = model(inp)
+
                 pred = pred.squeeze().cpu().numpy()
 
                 if scaler != "none":
@@ -280,6 +284,23 @@ class FuturesDataset(Dataset):
             return atten_i
         else:
             return None
+
+    def get_attention(self, model, id):
+        if model.name in ['informer', 'transformer']:
+            inp = self[id]['inp'].unsqueeze(
+                0).to(device)
+
+            if model.name == 'transformer':
+                attn = model.get_attention(inp)
+            elif model.name == 'informer':
+                emb = self[id]['time_embd'].unsqueeze(0).to(device)
+                _, attn = model(inp, emb)
+            else:
+                raise ValueError("Model not supported")
+
+            return attn
+        else:
+            raise ValueError("Model not supported")
 
 # --- --- ---
 
