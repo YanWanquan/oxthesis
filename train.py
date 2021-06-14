@@ -73,7 +73,7 @@ hyper_grid = {
         'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
     },
     'transformer': {
-        'batch_size': [64, 128],
+        'batch_size': [64, 128, 254],
         'lr': [0.1, 0.01, 0.001, 0.0001],
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
@@ -81,7 +81,7 @@ hyper_grid = {
         'n_head': [1, 2, 4, 8],
         'n_layer': [1, 2, 3],
         'd_hidden_factor': [1, 2, 4],
-        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5, 0.7],
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
     },
     'conv_transformer': {
         'batch_size': [64, 128],
@@ -206,9 +206,11 @@ def main():
             args.test_date) + pd.offsets.DateOffset(years=args.test_win)
         args.do_log = False  # runx works just for one model per experiment
 
-        val_loss = {}
-        test_loss = {}
+        best_val_loss = {}
+        best_test_loss = {}
         best_settings = {}
+        log_val_loss = {}
+        log_test_loss = {}
         checkpoints = {}
         wins_len = []
         while args.test_date < args.stop_date:
@@ -235,14 +237,18 @@ def main():
                     # run window ----
                     val_loss_i, test_loss_i, setting_i, checkpoint_i = run_training_window(
                         args_dict_i)
+
+                    # logs
                     checkpoints[args.test_date].append(checkpoint_i)
+                    log_val_loss[setting_i] = val_loss_i
+                    log_test_loss[setting_i] = test_loss_i
 
                     if val_loss_i < search_best_score:
                         print(
                             f"\n> Found better hyperparams ({search_best_score:.6f} --> {val_loss_i:.6f}): {setting_i}")
                         search_best_score = val_loss_i
                         search_best_checkpoint = checkpoint_i
-                        val_loss[args.test_date], test_loss[args.test_date], best_settings[args.test_date] = (
+                        best_val_loss[args.test_date], best_test_loss[args.test_date], best_settings[args.test_date] = (
                             val_loss_i, test_loss_i, setting_i)
 
                 # clean all checkpoints except best one
@@ -251,7 +257,7 @@ def main():
                         os.remove(file)
 
             else:
-                val_loss[args.test_date], test_loss[args.test_date], best_settings[args.test_date], _ = run_training_window(
+                best_val_loss[args.test_date], best_test_loss[args.test_date], best_settings[args.test_date], _ = run_training_window(
                     args)
 
             # update expanding window
@@ -264,23 +270,38 @@ def main():
             if args.end_date > args.stop_date:
                 args.end_date = args.stop_date
 
-        val_mean = np.average(list(val_loss.values()), weights=wins_len)
-        test_mean = np.average(list(test_loss.values()), weights=wins_len)
+        # log settings
+        if args.random_search_len:
+            df_log = pd.concat([
+                pd.Series(log_val_loss.values(),
+                          log_val_loss.keys(), name="val_loss"),
+                pd.Series(log_test_loss.values(),
+                          log_test_loss.keys(), name="test_loss"),
+            ], axis=1).reset_index()
+            df_log = df_log.rename(columns={'index': 'setting'})
+            df_log.index.name = 'id'
+            df_log.to_csv(
+                args.logdir + "/exp-win_random_log_hyper.csv")
 
+        # best settings per window
+        best_val_mean = np.average(
+            list(best_val_loss.values()), weights=wins_len)
+        best_test_mean = np.average(
+            list(best_test_loss.values()), weights=wins_len)
         df_results = pd.DataFrame({
-            'val_loss': val_loss,
-            'test_loss': test_loss,
+            'val_loss': best_val_loss,
+            'test_loss': best_test_loss,
             'best_settings': best_settings
         })
         df_results.index.name = "window"
         df_results.to_csv(
-            args.logdir + f"/exp-win_random_arch-{args.arch}_-vl-{val_mean:.6f}_tl-{test_mean:.6f}.csv")
+            args.logdir + f"/exp-win_random_arch-{args.arch}_-vl-{best_val_mean:.6f}_tl-{best_test_mean:.6f}.csv")
 
         print("\nEnd of expanding window training")
         print(
-            f"> Finished expanding window training \t val loss: {val_mean}")
+            f"> Finished expanding window training \t val loss: {best_val_mean}")
         print(
-            f"> Finished expanding window training \t test loss: {test_mean}")
+            f"> Finished expanding window training \t test loss: {best_test_mean}")
     elif args.test_date is not None:
         print("> Start single window training")
         args.do_log = True
@@ -608,6 +629,7 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             pass
         else:
             prediction = model(inputs)
+            model.get_attention(inputs)
 
         if LossHelper.use_returns_for_loss(train_manager['loss_type']):
             loss = loss_fn(prediction, returns,

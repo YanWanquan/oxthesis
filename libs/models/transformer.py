@@ -94,7 +94,7 @@ class TransformerEncoder(nn.Module):
                 emb, emb, emb, attn_mask=src_mask)
             attention_layers.append(attn_l[1])
 
-        attn = torch.cat(attention_layers)
+        attn = torch.stack(attention_layers)
         if len(attention_layers) == 1:
             attn = attn.unsqueeze(0)
         attn = attn.permute(1, 0, 2, 3)

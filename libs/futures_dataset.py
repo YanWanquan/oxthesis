@@ -198,9 +198,8 @@ class FuturesDataset(Dataset):
             'trg': self.data[idx, :, self.trg_indexes],  # B x T x 1 (tensor)
             'time': self.time_id[idx],  # B x T (tensor)
             'time_embd': self.time_embd[idx],  # B x T x E (tensor)
-            # inst: index 0 are the numerical ids
+            # additional vars for plotting ----
             'inst': self.inst_index.iloc[idx].tolist()[1],  # len: B (list)
-            # additional vars for plotting
             'rts': self.data[idx, :, self.rts_indexes],
             'prs': self.data[idx, :, self.prs_indexes]  # prs, prs_lead
         }
