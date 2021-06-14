@@ -64,8 +64,8 @@ hyper_grid = {
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
         'attn': ['prob', 'full'],
-        # 'embed_type': ['fixed', 'timeF'],
-        'embed_type': ['simple'],
+        'embed_type': ['fixed', 'timeF'],
+        # 'embed_type': ['simple'],
         'n_layer': [1, 2],
         'n_head': [2, 4, 8],
         'd_model': [8, 16, 32, 64, 128],

@@ -151,6 +151,7 @@ class DataEmbedding(nn.Module):
 
         # SVEN
         if self.only_encoder:
+            print("> Informer only encoding")
             self.value_embedding = nn.Linear(c_in, d_model)
         else:
             self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
@@ -163,11 +164,7 @@ class DataEmbedding(nn.Module):
 
     def forward(self, x, x_mark):
         # SVEN
-        if not self.only_encoder:
-            x = self.value_embedding(
-                x_mark) + self.position_embedding(x_mark) + self.temporal_embedding(x_mark)
-        else:
-            x = self.value_embedding(
-                x) + self.position_embedding(x) + self.temporal_embedding(x_mark)
+        x = self.value_embedding(
+            x) + self.position_embedding(x_mark) + self.temporal_embedding(x_mark)
 
         return self.dropout(x)
