@@ -84,7 +84,8 @@ class LossHelper:
     def get_strategy_loss_function(loss_type):
         return {
             LossTypes.AVG_RETURNS: calc_avg_returns,
-            LossTypes.SHARPE: calc_sharpe
+            LossTypes.SHARPE: calc_sharpe,
+            LossTypes.MSE: calc_sharpe  # remember to set --eval_strategy False
         }[loss_type]
 
     @staticmethod

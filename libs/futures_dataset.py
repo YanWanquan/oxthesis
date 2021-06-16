@@ -59,6 +59,9 @@ class FuturesDataset(Dataset):
         # lookups
         self.cov_lookup = {label: i for i, label in enumerate(
             utils.order_set(data_scal[self.dat_type].columns.get_level_values(1)))}
+        tmp_inst = list(dataloader.df[DataTypes.TRAIN].columns.unique(
+            level=0))
+        self.inst_lookup = {inst: i for i, inst in enumerate(tmp_inst)}
         self.cov_indexes = [
             i for k, i in self.cov_lookup.items() if k in self.INP_COLS]
         self.trg_indexes = [
@@ -200,6 +203,7 @@ class FuturesDataset(Dataset):
             'time_embd': self.time_embd[idx],  # B x T x E (tensor)
             # additional vars for plotting ----
             'inst': self.inst_index.iloc[idx].tolist()[1],  # len: B (list)
+            'inst_id': self.inst_lookup[self.inst_index.iloc[idx].tolist()[1]],
             'rts': self.data[idx, :, self.rts_indexes],
             'prs': self.data[idx, :, self.prs_indexes]  # prs, prs_lead
         }

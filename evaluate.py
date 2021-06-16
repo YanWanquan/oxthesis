@@ -34,6 +34,12 @@ def get_args():
     # saved files ----
     parser.add_argument('--model_type', type=str, nargs='?', default='ml',
                         help="Choose the model type to run", choices=['tsmom', 'long', 'ml'])
+
+    # tsmom / long ----
+    parser.add_argument('--lookback', type=int, nargs='?',
+                        default=252, help="TSMOM: lookback period")
+
+    # ml ----
     parser.add_argument('--checkpoint_path', type=str, nargs='?', default=None,
                         help="Path to the runx checkpoint")
     parser.add_argument('--checkpoint_dir', type=str, nargs='?', default=None,
@@ -99,7 +105,8 @@ def run_test_window(args):
                 'lead_target': 1,
                 'start_date': args.start_date,
                 'test_date': args.test_date,
-                'end_date': args.end_date
+                'end_date': args.end_date,
+                'lookback': args.lookback
             }
         }
 
@@ -109,11 +116,12 @@ def run_test_window(args):
         test_date=train_manager['args']['test_date'], lead_target=train_manager['args']['lead_target'])
 
     if args.model_type in ['tsmom', 'long']:
-        # TBD: add lookback as argument
-        model = {
-            'long': LongOnlyStrategy,
-            'tsmom': BasicMomentumStrategy
-        }[args.model_type]()
+        if args.model_type == 'long':
+            model = LongOnlyStrategy()
+        elif args.model_type == 'tsmom':
+            model = BasicMomentumStrategy(
+                lookback=train_manager['args']['lookback'])
+
         test_dataloader = None
     elif args.model_type == 'ml':
         scaler_path = train_manager['scaler_path'] if args.scaler_path is None else args.scaler_path
@@ -144,7 +152,10 @@ def evaluate(model, data_iter, base_df, train_manager):
 
     # evaluate test data ----
     test_loss = evaluate_model(model, data_iter, train_manager)
-    print(f">> Test loss: {test_loss}")
+    test_strategy_loss = evaluate_model_strategy(
+        model, data_iter, train_manager, base_df)
+    print(
+        f">> Test loss: {test_loss:.6f} \t test strategy loss: {test_strategy_loss}")
 
     # get predictions & calc strategy returns ----
     df_skeleton = base_df.swaplevel(axis=1)['prs']
@@ -183,6 +194,26 @@ def evaluate(model, data_iter, base_df, train_manager):
     return 1
 
 
+def evaluate_model_strategy(model, data_iter, train_manager, base_df):
+    df_skeleton = base_df.swaplevel(axis=1)['prs']
+    scaled_rts = base_df.xs('rts_scaled', axis=1,
+                            level=1, drop_level=True)
+
+    predictions = calc_predictions_df(model, data_iter, df_shape=df_skeleton.shape,
+                                      df_index=df_skeleton.index, df_insts=df_skeleton.columns,
+                                      win_step=train_manager['args']['win_len'], scaler=train_manager['args']['scaler'], loss_type=train_manager['loss_type'])
+    positions = calc_position_df(
+        predictions, train_manager['loss_type'])
+    str_returns = utils.calc_strategy_returns(
+        positions=positions, realized_returns=scaled_rts, aggregate_by='time', lead=1)
+
+    loss_fn = LossHelper.get_strategy_loss_function(
+        train_manager['loss_type'])
+    str_loss = loss_fn(str_returns)
+
+    return str_loss
+
+
 def evaluate_model(model, data_iter, train_manager, do_log=None):
     model.eval()
 
@@ -202,6 +233,10 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
                 if len(prediction) > 1:
                     # returns also the attention
                     prediction = prediction[0]
+            elif model.name == 'conv_momentum':
+                inputs_time_embd = batch['time_embd'].double().to(device)
+                x_static = batch['inst_id'].to(device)
+                prediction = model(inputs, inputs_time_embd, x_static)
             else:
                 prediction = model(inputs)
 
@@ -220,7 +255,6 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
 
 def calc_position_df(prediction, loss_type):
     # TBD: add more complicated position rules
-    print("> Calc positions for test data")
 
     pred_type = LossHelper.get_prediction_type(loss_type)
     if pred_type == 'position':
@@ -242,8 +276,6 @@ def calc_position_sizing(signals):
 
 
 def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step, loss_type=None, scaler=None):
-    print("> Calc predictions for test data")
-
     predictions_df = pd.DataFrame(
         np.empty(df_shape), columns=df_insts, index=df_index)
     predictions_df[:] = np.nan
@@ -263,6 +295,10 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
                 if len(prediction) > 1:
                     # returns also the attention
                     prediction = prediction[0]
+            elif model.name == 'conv_momentum':
+                inputs_time_embd = batch['time_embd'].double().to(device)
+                x_static = batch['inst_id'].to(device)
+                prediction = model(input, inputs_time_embd, x_static)
             else:
                 prediction = model(input)
 
@@ -291,7 +327,7 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
                 predictions_df.loc[slicer] = prediction_i
 
     # inverse scale trend predictions
-    if (scaler is not None and scaler is not "none") and LossHelper.get_prediction_type(loss_type) == 'trend':
+    if (scaler is not None and scaler != "none") and LossHelper.get_prediction_type(loss_type) == 'trend':
         prediction = utils.inverse_scale_tensor(
             df=predictions_df, scaler_dict=scaler)
 
@@ -306,10 +342,14 @@ def evaluate_tsmom(model, data, time_test, do_save=True):
 
     if do_save:
         test_time = pd.to_datetime(time_test).year
+        setting = f"a-{model.name}_ty-{test_time}_"
+        if model.name == "tsmom":
+            setting = setting + f"lb-{model.lookback}"
+
         pos_path = utils.get_save_path(
-            file_label='pos', model=model.name, setting=f"{model.name}__ty-{test_time}_", time_test=time_test)
+            file_label='pos', model=model.name, setting=setting, time_test=time_test)
         rts_path = utils.get_save_path(
-            file_label='rts', model=model.name, setting=f"{model.name}__ty-{test_time}_", time_test=time_test)
+            file_label='rts', model=model.name, setting=setting, time_test=time_test)
         str_pos.to_csv(pos_path)
         str_rts.to_csv(rts_path)
 

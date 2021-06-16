@@ -168,3 +168,48 @@ class DataEmbedding(nn.Module):
             x) + self.position_embedding(x_mark) + self.temporal_embedding(x_mark)
 
         return self.dropout(x)
+
+
+class MomentumEmbedding(nn.Module):
+    "DataEmbedding plus entity encoding"
+
+    def __init__(self, c_in, d_model, n_categories, embed_type='fixed', freq='d', dropout=0.1, only_encoder=False):
+        super(MomentumEmbedding, self).__init__()
+        self.only_encoder = only_encoder
+        self.n_categories = n_categories
+
+        if self.only_encoder:
+            print("> Informer only encoding")
+            self.value_embedding = nn.Linear(c_in, d_model)
+        else:
+            self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
+
+        self.position_embedding = PositionalEmbedding(d_model=d_model)
+        self.temporal_embedding = TemporalEmbedding(d_model=d_model, embed_type=embed_type, freq=freq) if embed_type != 'timeF' else TimeFeatureEmbedding(
+            d_model=d_model, embed_type=embed_type, freq=freq)
+
+        self.entity_embedding = nn.Embedding(n_categories, d_model)
+
+        self.dropout = nn.Dropout(p=dropout)
+
+    def forward(self, x, x_temporal, x_static):
+        B, L, D = x.shape
+
+        if x_static is None:
+            raise ValueError("static before!")
+
+        if x_temporal is None:
+            raise ValueError("Why is x none?")
+
+        # SVEN
+        x = self.value_embedding(
+            x) + self.position_embedding(x_temporal) + self.temporal_embedding(x_temporal)
+        x = x + self.expand_static_context(self.entity_embedding(x_static), L)
+
+        return self.dropout(x)
+
+    def expand_static_context(self, context, timesteps):
+        """
+        add time dimension to static context
+        """
+        return context[:, None].expand(-1, timesteps, -1)

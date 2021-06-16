@@ -19,7 +19,6 @@ import torch.nn.functional as F
 import numpy as np
 from math import sqrt
 from libs.losses import LossHelper
-import pickle
 
 from libs.models.embeddings import *
 
@@ -126,92 +125,6 @@ class InformerEncoder(nn.Module):
         mask = mask.float().masked_fill(mask == 0, float(
             '-inf')).masked_fill(mask == 1, float(0.0))
         return mask
-
-# --- ---
-# FULL MODEL
-# model.py
-# --- ---
-
-
-class Informer(nn.Module):
-    def __init__(self, loss_type, enc_in, dec_in, c_out, out_len,
-                 factor=5, d_model=512, n_heads=8, e_layers=3, d_layers=2, d_ff=512,
-                 dropout=0.0, attn='prob', embed='fixed', freq='h', activation='gelu',
-                 output_attention=False, distil=True, mix=True):
-        super(Informer, self).__init__()
-        self.pred_len = out_len
-        self.attn = attn
-        self.output_attention = output_attention
-
-        # Encoding
-        self.enc_embedding = DataEmbedding(
-            enc_in, d_model, embed, freq, dropout)
-        self.dec_embedding = DataEmbedding(
-            dec_in, d_model, embed, freq, dropout)
-        # Attention
-        Attn = ProbAttention if attn == 'prob' else FullAttention
-        # Encoder
-        self.encoder = Encoder(
-            [
-                EncoderLayer(
-                    AttentionLayer(Attn(False, factor, attention_dropout=dropout, output_attention=output_attention),
-                                   d_model, n_heads, mix=False),
-                    d_model,
-                    d_ff,
-                    dropout=dropout,
-                    activation=activation
-                ) for l in range(e_layers)
-            ],
-            [
-                ConvLayer(
-                    d_model
-                ) for l in range(e_layers-1)
-            ] if distil else None,
-            norm_layer=torch.nn.LayerNorm(d_model)
-        )
-        # Decoder
-        self.decoder = Decoder(
-            [
-                DecoderLayer(
-                    AttentionLayer(Attn(True, factor, attention_dropout=dropout, output_attention=False),
-                                   d_model, n_heads, mix=mix),
-                    AttentionLayer(FullAttention(False, factor, attention_dropout=dropout, output_attention=False),
-                                   d_model, n_heads, mix=False),
-                    d_model,
-                    d_ff,
-                    dropout=dropout,
-                    activation=activation,
-                )
-                for l in range(d_layers)
-            ],
-            norm_layer=torch.nn.LayerNorm(d_model)
-        )
-        # self.end_conv1 = nn.Conv1d(in_channels=label_len+out_len, out_channels=out_len, kernel_size=1, bias=True)
-        # self.end_conv2 = nn.Conv1d(in_channels=d_model, out_channels=c_out, kernel_size=1, bias=True)
-        self.projection = nn.Linear(d_model, c_out, bias=True)
-
-        # SVEN
-        self.output_fn = LossHelper.get_output_activation(loss_type)
-
-    def forward(self, x_enc, x_mark_enc, x_dec, x_mark_dec,
-                enc_self_mask=None, dec_self_mask=None, dec_enc_mask=None):
-        enc_out = self.enc_embedding(x_enc, x_mark_enc)
-        enc_out, attns = self.encoder(enc_out, attn_mask=enc_self_mask)
-
-        dec_out = self.dec_embedding(x_dec, x_mark_dec)
-        dec_out = self.decoder(
-            dec_out, enc_out, x_mask=dec_self_mask, cross_mask=dec_enc_mask)
-        dec_out = self.projection(dec_out)
-
-        # SVEN
-        out = self.output_fn(dec_out)
-
-        # dec_out = self.end_conv1(dec_out)
-        # dec_out = self.end_conv2(dec_out.transpose(2,1)).transpose(1,2)
-        if self.output_attention:
-            return out[:, -self.pred_len:, :], attns
-        else:
-            return out[:, -self.pred_len:, :]  # [B, L, D]
 
 # --- ---
 # encoder.py
@@ -431,7 +344,13 @@ class ProbCausalAttention(nn.Module):
         _, _, L_Q, _ = Q.shape
 
         # calculate the sampled Q_K
-        K_expand = K.unsqueeze(-3).expand(B, H, L_Q, L_K, E)
+        #K_expand = K.unsqueeze(-3).expand(B, H, L_Q, L_K, E)
+        K_expand = K.unsqueeze(-3).repeat(1, 1, L_Q, 1, 1)
+
+        # SVEN - TMP
+        mask = TriangularCausalMask(B, L_Q, H=H, D=E, device=Q.device).mask
+        K_expand.masked_fill_(mask, 0)
+
         # real U = U_part(factor*ln(L_k))*L_q
         index_sample = torch.randint(L_K, (L_Q, sample_k))
         K_sample = K_expand[:, :, torch.arange(
@@ -470,7 +389,7 @@ class ProbCausalAttention(nn.Module):
         scores_top, index = self._prob_QK(
             queries, keys, sample_k=U_part, n_top=u)
 
-        # add scale factor
+        # add scale factory
         scale = self.scale or 1./sqrt(D)
         if scale is not None:
             scores_top = scores_top * scale
@@ -489,7 +408,6 @@ class ProbCausalAttention(nn.Module):
         if self.mask_flag:
             if attn_mask is None:
                 attn_mask = TriangularCausalMask(B, L_Q, device=queries.device)
-
             scores.masked_fill_(attn_mask.mask, -np.inf)
 
         # tmp: plus dropout? not in prob, but in full... don't think necessary
@@ -552,14 +470,6 @@ class ProbAttention(nn.Module):
             # requires that L_Q == L_V, i.e. for self-attention only
             assert(L_Q == L_V)
             contex = V.cumsum(dim=-2)
-
-            # SVEN: Start
-            # Apply causal mask to V instead of the sparse scores
-            # better to place it somewhere else?!
-            # causal_mask = TriangularCausalMask(
-            #    B, L_Q, device).mask[0, :, :].squeeze()
-            # V.masked_fill_(causal_mask, 0)  # broadcasting
-            # SVEN: End
 
         return contex
 
@@ -670,11 +580,16 @@ class AttentionLayer(nn.Module):
 
 
 class TriangularCausalMask():
-    def __init__(self, B, L, device="cpu"):
-        mask_shape = [B, 1, L, L]
+    def __init__(self, B, L, H=1, D=None, device="cpu"):
+        # Sven
+        mask_shape = [B, H, L, L]
+
         with torch.no_grad():
             self._mask = torch.triu(torch.ones(
                 mask_shape, dtype=torch.bool), diagonal=1).to(device)
+
+            if D is not None:
+                self._mask = self._mask.unsqueeze(-1).repeat(1, 1, 1, 1, D)
 
     @property
     def mask(self):

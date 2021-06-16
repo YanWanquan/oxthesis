@@ -95,7 +95,5 @@ class TransformerEncoder(nn.Module):
             attention_layers.append(attn_l[1])
 
         attn = torch.stack(attention_layers)
-        if len(attention_layers) == 1:
-            attn = attn.unsqueeze(0)
         attn = attn.permute(1, 0, 2, 3)
         return attn  # B x n_layer x L x L

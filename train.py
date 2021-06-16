@@ -32,7 +32,8 @@ from libs.models.transformer import TransformerEncoder
 from libs.models.conv_transformer import ConvTransformerEncoder
 from libs.models.lstm_dropout import LSTM
 from libs.losses import LossTypes, LossHelper
-from libs.models.informer import InformerEncoder, Informer
+from libs.models.informer import InformerEncoder
+from libs.models.conv_momentum import ConvMomentum
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -41,7 +42,7 @@ train_archs = {
     'lstm': LSTM,
     'conv_transformer': ConvTransformerEncoder,
     'informer': InformerEncoder,
-    'informer_full': Informer
+    'conv_momentum': ConvMomentum
 }
 
 # torch.manual_seed(0)
@@ -56,28 +57,29 @@ hyper_grid = {
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ----
         'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
-        'd_hidden': [5, 10, 20, 40, 80]
+        'd_hidden': [5, 10, 20, 40, 80],
+        'n_layer': [1]
     },
     'informer': {
         'batch_size': [64, 128],
-        'lr': [0.1, 0.01, 0.001],
+        'lr': [0.01, 0.001],
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
-        'attn': ['prob', 'full'],
-        'embed_type': ['fixed', 'timeF'],
-        # 'embed_type': ['simple'],
+        'attn': ['prob'],
+        # 'embed_type': ['fixed', 'timeF'],
+        'embed_type': ['simple'],
         'n_layer': [1, 2],
         'n_head': [2, 4, 8],
-        'd_model': [8, 16, 32, 64, 128],
+        'd_model': [8, 16, 32, 64],
         'd_hidden_factor': [1, 2, 4],
         'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
     },
     'transformer': {
         'batch_size': [64, 128, 254],
-        'lr': [0.1, 0.01, 0.001, 0.0001],
+        'lr': [0.01, 0.001, 0.0001],
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
-        'd_model': [8, 16, 32, 64, 128],
+        'd_model': [8, 16, 32, 64],
         'n_head': [1, 2, 4, 8],
         'n_layer': [1, 2, 3],
         'd_hidden_factor': [1, 2, 4],
@@ -85,17 +87,32 @@ hyper_grid = {
     },
     'conv_transformer': {
         'batch_size': [64, 128],
-        'lr': [0.1, 0.01, 0.001, 0.0001],
+        'lr': [0.01, 0.001, 0.0001],
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
-        'd_model': [8, 16, 32, 64, 128],
+        'd_model': [8, 16, 32, 64],
         'n_head': [1, 2, 4, 8],
         'n_layer': [1, 2, 3],
         'd_hidden_factor': [1, 2, 4],
-        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5, 0.7],
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
         # ---
         'conv_len': [1, 3, 6, 9]
     },
+    'conv_momentum': {
+        'batch_size': [64, 128, 254],
+        'lr': [0.01, 0.001, 0.0001],
+        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        # ----
+        'dropout': [0.1, 0.2, 0.3, 0.4],
+        'd_hidden': [4, 12, 20, 40, 80],
+        'n_layer': [1],
+        # ----
+        'n_head': [1, 2, 4],
+        'd_hidden_factor': [1, 2, 4],
+        # ----
+        'use_embed': [0],
+        'embed_type': ['timeF', 'momentum']
+    }
 }
 
 
@@ -119,8 +136,8 @@ def get_args():
         train_archs.keys()), default="transformer", help="Learning architecture")
     parser.add_argument('--loss_type', type=str, nargs='?', choices=list(
         loss_dict.keys()), default="sharpe", help="Loss function")
-    parser.add_argument('--eval_strategy', type=bool, default=True,
-                        help="Either evaluate and early stop by batch loss (False) or strategy loss (True)")
+    parser.add_argument('--stopping_type', type=str, default='strategy', choices=['strategy', 'batch'],
+                        help="Either evaluate and early stop by batch loss or strategy loss")
     parser.add_argument('--random_search_len', type=int, default=None,
                         help="Run the hyperparam inside the expanding window? Also specifiy --logdir")
     # data ----
@@ -163,7 +180,7 @@ def get_args():
     parser.add_argument('--n_layer', type=int, nargs='?',
                         default=1, help="Number of sub-encoder layers in transformer")
     parser.add_argument('--d_hidden', type=int, nargs='?',
-                        default=10, help="Dimension of feedforward network model (transformer) or in hidden state h (lstm)")
+                        default=12, help="Dimension of feedforward network model (transformer) or in hidden state h (lstm)")
     # .. transformer
     parser.add_argument('--d_model', type=int, nargs='?',
                         default=20, help="Number of features in the encoder inputs")
@@ -177,15 +194,13 @@ def get_args():
     # .. informer
     parser.add_argument('--attn', type=str, nargs='?', choices=['prob', 'full'],
                         default='prob', help="Informer: choose attention mechanism")
-    parser.add_argument('--embed_type', type=str, nargs='?', choices=['fixed', 'timeF', 'simple'],
-                        default='fixed', help="Informer: choose embedding layer")
     parser.add_argument('--factor', type=int, nargs='?',
                         default=5, help="Informer: sampling factor for prob attn")
-    # .. informer full
-    parser.add_argument('--pred_len', type=int, nargs='?',
-                        default=63, help="Full Informer: prediction length")
-    parser.add_argument('--label_len', type=int, nargs='?',
-                        default=63, help="Full Informer: label length for decoder")
+    # .. informer / conv_momentum
+    parser.add_argument('--embed_type', type=str, nargs='?', choices=['fixed', 'timeF', 'simple', 'momentum'],
+                        default='fixed', help="Informer: choose embedding layer")
+    parser.add_argument('--use_embed', type=int, nargs='?', choices=[0, 1],
+                        default=1, help="Conv Momentum: choose embedding, yes (1) no (0)?")
 
     args = parser.parse_args()
     return args
@@ -200,7 +215,7 @@ def main():
     if args.test_win is not None:
         print("> Start expanding window training")
         args.test_date = pd.to_datetime(
-            args.start_date) + pd.offsets.DateOffset(years=args.test_win)
+            args.test_date)  # + pd.offsets.DateOffset(years=args.test_win)
         args.stop_date = pd.to_datetime(args.end_date)
         args.end_date = pd.to_datetime(
             args.test_date) + pd.offsets.DateOffset(years=args.test_win)
@@ -381,10 +396,10 @@ def run_training_window(args):
     d_input = len(dataset_train.INP_COLS)
     d_output = 1
 
-    if args.d_hidden_factor > 0:
-        args.d_hidden = args.d_hidden_factor * args.d_model
-
     if args.arch == 'transformer':
+        if args.d_hidden_factor > 0:
+            args.d_hidden = args.d_hidden_factor * args.d_model
+
         len_input_window = args.win_len
         len_output_window = len_input_window
 
@@ -397,6 +412,9 @@ def run_training_window(args):
         model = TransformerEncoder(d_model=args.d_model, d_input=d_input, d_output=d_output, n_head=args.n_head, n_layer=args.n_layer, d_hidden=args.d_hidden,
                                    dropout=args.dropout, len_input_window=len_input_window, len_output_window=len_output_window, loss_type=train_manager['loss_type'], device=device)
     elif args.arch == 'conv_transformer':
+        if args.d_hidden_factor > 0:
+            args.d_hidden = args.d_hidden_factor * args.d_model
+
         do_sparse = False
         do_scale_att = False
 
@@ -426,7 +444,10 @@ def run_training_window(args):
         model = LSTM(d_input=d_input, d_output=d_output,
                      d_hidden=args.d_hidden, n_layer=args.n_layer, dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
         args.d_hidden = args.d_hidden[0]
-    elif args.arch == 'informer' or args.arch == 'informer_full':
+    elif args.arch == 'informer':
+        if args.d_hidden_factor > 0:
+            args.d_hidden = args.d_hidden_factor * args.d_model
+
         # tmp: at the moment no hyperparamter
         freq = 'd'  # daily
         factor = args.factor  # factor to sample for prob attention
@@ -447,6 +468,7 @@ def run_training_window(args):
                                     e_layers=args.n_layer, d_ff=d_ff, dropout=args.dropout, attn=attn, embed_type=embed_type,
                                     freq=freq, output_attention=output_attention, distil=do_distil, win_len=win_len)
         elif args.arch == 'informer_full':
+            raise NotImplementedError()
             dec_in = 63 + args.step
             c_out = d_output  # ?!
             out_len = args.pred_len
@@ -461,6 +483,32 @@ def run_training_window(args):
             raise NotImplementedError("Need to code input first!")
         else:
             raise ValueError()
+    elif args.arch == 'conv_momentum':
+        # for static
+        use_embed = args.use_embed
+        n_categories = len(dataset_train.inst_lookup.keys())
+        embed_type = args.embed_type
+
+        dropout = 0.
+        dropoutw = args.dropout
+        dropouti = args.dropout
+        dropouto = args.dropout
+        args.d_hidden = [args.d_hidden for l in range(args.n_layer)]
+
+        d_model = args.d_hidden[-1]
+        len_input_window = args.win_len
+
+        if args.d_hidden_factor > 0:
+            args.d_attn_hidden = args.d_hidden_factor * args.d_model
+        else:
+            args.d_attn_hidden = args.d_model
+
+        model = ConvMomentum(
+            d_input=d_input, d_output=d_output, d_hidden=args.d_hidden, n_layer_lstm=args.n_layer,
+            len_input_window=len_input_window, n_head=args.n_head, d_model=d_model, d_attn_hidden=args.d_attn_hidden, n_layer_attn=1,
+            n_categories=n_categories, use_embed=use_embed,
+            dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
+        args.d_hidden = args.d_hidden[0]
     else:
         raise NotImplementedError("Architecture not implemented yet.")
 
@@ -470,13 +518,13 @@ def run_training_window(args):
     # label the experiment
     train_manager['setting'] = 'a-{}_l-{}_ty-{}_bs-{}_lr-{}_pa-{}_gn-{}_wl-{}_ws-{}_nl-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
         args.test_date).year, args.batch_size, args.lr, args.patience, args.max_grad_norm, args.win_len, args.step, args.n_layer, args.d_hidden, args.dropout)
-    if model.name in ['transformer', 'conv_transformer', 'informer']:
+    if model.name in ['transformer', 'conv_transformer', 'informer', 'conv_momentum']:
         train_manager['setting'] = train_manager['setting'] + \
             '_dm-{}_nh-{}'.format(args.d_model, args.n_head)
     if model.name == 'conv_transformer':
         train_manager['setting'] = train_manager['setting'] + \
             '_ql-{}'.format(args_conv_transf['q_len'])
-    if model.name == 'informer' or model.name == 'informer_full':
+    if model.name == 'informer':
         train_manager['setting'] = train_manager['setting'] + \
             '_attn-{}_embed-{}_factor-{}'.format(
                 args.attn, args.embed_type, args.factor)
@@ -484,6 +532,14 @@ def run_training_window(args):
         logx.msg(f"Setting: {train_manager['setting']}")
     else:
         print(f"Setting: {train_manager['setting']}")
+
+    # tmp: informer notebook
+    # pickle.dump({
+    #     'train_df': base_loader.df[DataTypes.TRAIN],
+    #     'val_df': base_loader.df[DataTypes.VAL],
+    #     'test_df': base_loader.df[DataTypes.TEST]
+    # }, open("data_df.p", 'wb'))
+    # exit()
 
     best_checkpoint_path, val_loss = train(model=model, train_iter=train_dataloader,
                                            val_iter=val_dataloader, train_manager=train_manager,
@@ -493,12 +549,13 @@ def run_training_window(args):
     # (5) test model ----
     _, model, train_manager = utils.load_model(path=best_checkpoint_path)
 
-    if train_manager['args']['eval_strategy']:
+    if train_manager['args']['stopping_type'] == 'strategy':
         test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
                                   train_manager=train_manager, do_log=False, do_strategy=True, base_df=base_loader.df[DataTypes.TEST])
     else:
         test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
-                                  train_manager=train_manager, do_log=False)
+                                  train_manager=train_manager, do_log=False, do_strategy=False)
+
     print(f">> Val loss: {val_loss:.6f}")
     print(f">> Test loss: {test_loss:.6f}")
 
@@ -554,9 +611,6 @@ def train(model, train_iter, val_iter, train_manager, do_log=False, val_df=None)
                      'train_manager': train_manager,
                      'model': model,
                      'optimizer': train_manager['optimizer'].state_dict()}
-        # if do_log:
-        #    logx.save_model(save_dict, metric=val_loss,
-        #                    epoch=epoch_i + 1, higher_better=False)
 
         # save the current epoch & overwrite old checkpoint (filename: <setting>.tmp)
         checkpoint_path = train_manager['args']['logdir'] + \
@@ -564,7 +618,7 @@ def train(model, train_iter, val_iter, train_manager, do_log=False, val_df=None)
         pickle.dump(save_dict, open(checkpoint_path, 'wb'))
 
         # early stopping ----
-        if train_manager['args']['eval_strategy']:
+        if train_manager['args']['stopping_type'] == 'strategy':
             checkpoint_loss = val_str_loss
         else:
             checkpoint_loss = val_loss
@@ -590,10 +644,20 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
     max_grad_norm = train_manager['args']['max_grad_norm']
 
     loss_epoch = np.zeros((len(train_iter), 2))  # batch loss & batch size
+
+    # tmp: Zihao
+    # stack_input_numpy = []
+    # stack_labels_numpy = []
+
     for i, batch in enumerate(train_iter):
         inputs = batch['inp'].double().to(device)
         labels = batch['trg'].double().to(device)
         returns = batch['rts'].double().to(device)
+
+        # tmp: Zihao
+        # stack_input_numpy.append(inputs.cpu().numpy())
+        # stack_labels_numpy.append(labels.cpu().numpy())
+        # continue
 
         optimizer.zero_grad()
 
@@ -601,35 +665,12 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
         if model.name == 'informer':
             inputs_time_embd = batch['time_embd'].double().to(device)
             prediction, attns = model(inputs, inputs_time_embd)
-        elif model.name == 'informer_full':
-            raise ValueError('Go away! Yet..')
-            dec_returns = batch['dec_in'].double()
-
-            # tmp!
-            train_manager['args']['padding'] = 0  # or 1
-
-            # decoder input ----
-            if train_manager['args']['padding'] == 0:
-                dec_inp = torch.zeros(
-                    [returns.shape[0], train_manager['args']['pred_len'], returns.shape[-1]])
-            elif train_manager['args']['padding'] == 0:
-                dec_inp = torch.ones(
-                    [returns.shape[0], train_manager['args']['pred_len'], returns.shape[-1]])
-            dec_inp = dec_inp.double()
-            dec_inp = torch.cat(
-                [returns[:, :train_manager['args']['label_len'], :], dec_inp], dim=1)
-            dec_inp = dec_inp.to(device)
-
-            # embedding ----
-            enc_time_embd = batch['time_embd'].double().to(device)
-            dec_time_embd = batch['time_embd'].double().to(device)  # ?!
-
-            prediction, attns = model(
-                inputs, enc_time_embd, dec_inp, dec_time_embd)
-            pass
+        elif model.name == 'conv_momentum':
+            inputs_time_embd = batch['time_embd'].double().to(device)
+            x_static = batch['inst_id'].to(device)
+            prediction = model(inputs, inputs_time_embd, x_static)
         else:
             prediction = model(inputs)
-            model.get_attention(inputs)
 
         if LossHelper.use_returns_for_loss(train_manager['loss_type']):
             loss = loss_fn(prediction, returns,
@@ -657,11 +698,19 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             else:
                 print(print_msg)
 
+    # tmp: Zihao
+    # input_numpy = np.stack(stack_input_numpy[0:-1], axis=0)
+    # labels_numpy = np.stack(stack_labels_numpy[0:-1], axis=0)
+    # print(input_numpy.shape)
+    # pickle.dump(input_numpy, open('input_numpy.p', 'wb'))
+    # pickle.dump(labels_numpy, open('labels_numpy.p', 'wb'))
+    # exit()
+
     mean_loss_epoch = np.average(loss_epoch[:, 0], weights=loss_epoch[:, 1])
     return mean_loss_epoch
 
 
-def evaluate_iter(model, data_iter, train_manager, do_strategy=True, base_df=None, do_log=False):
+def evaluate_iter(model, data_iter, train_manager, do_strategy=False, base_df=None, do_log=False):
     if do_strategy and base_df is not None:
         # strategy loss ----
         df_skeleton = base_df.swaplevel(axis=1)['prs']

@@ -23,10 +23,6 @@ class LSTM(nn.Module):
         """
         super().__init__()
 
-        # tmp
-        self.pack = True
-        self.last = False
-
         if not isinstance(d_hidden, list):
             d_hidden = [d_hidden]
 
@@ -60,8 +56,16 @@ class LSTM(nn.Module):
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
     def forward(self, src, hidden=None):
-        batch_size, seq_length, feat_size = src.size()
         emb = self.lockdrop(src, self.dropouti)
+
+        result = self.encoder_lstm(emb)
+
+        decoder_out = self.decoder(result)
+        out = self.output_fn(decoder_out)
+        return out
+
+    def encoder_lstm(self, emb, hidden=None):
+        batch_size, seq_length, dim_emb = emb.size()
 
         if hidden is None:
             hidden = self.init_hidden(batch_size)
@@ -106,11 +110,7 @@ class LSTM(nn.Module):
         output = self.lockdrop(raw_output, self.dropout)
         outputs.append(output)
 
-        result = output
-
-        decoder_out = self.decoder(result)
-        out = self.output_fn(decoder_out)
-        return out
+        return output
 
     def init_hidden(self, bsz):
         """
