@@ -17,8 +17,10 @@ class SimplePositionalEncoding(nn.Module):
     or this blog article: https://kazemnejad.com/blog/transformer_architecture_positional_encoding/.
     """
 
-    def __init__(self, d_model, max_len=5000):
+    def __init__(self, d_model, max_len=5000, add_x=True):
         super(SimplePositionalEncoding, self).__init__()
+        self.add_x = add_x
+
         pe = torch.zeros(max_len, d_model)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(torch.arange(
@@ -31,7 +33,10 @@ class SimplePositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)  # exclude from model's paramters
 
     def forward(self, x):
-        return x + self.pe[:x.size(0), :]
+        if self.add_x:
+            return x + self.pe[:x.size(0), :]
+        else:
+            return self.pe[:x.size(0), :]
 
 # --- ---
 # from Informer repo

@@ -70,7 +70,7 @@ class DataTypes(IntEnum):
 
 class BaseDataLoader:
 
-    def __init__(self, filename, index_col, start_date, end_date, test_date, lead_target):
+    def __init__(self, filename, index_col, start_date, end_date, test_date, lead_target, split_ratio_val=0.2):
         self.start_date = pd.to_datetime(start_date)
         self.end_date = pd.to_datetime(end_date)
         self.test_date = pd.to_datetime(test_date)
@@ -83,8 +83,8 @@ class BaseDataLoader:
         self.df = self.filter_df(
             self.df, start_date=self.start_date, end_date=self.end_date)
 
-        self.raw_df = self.train_split_data(self.raw_df)
-        self.df = self.train_split_data(self.df)
+        self.raw_df = self.train_split_data(self.raw_df, split_ratio_val)
+        self.df = self.train_split_data(self.df, split_ratio_val)
 
     def load_raw_df(self, filename, index_col, parse_dates=True, dat_first=True):
         """
@@ -171,12 +171,12 @@ class BaseDataLoader:
 
         return df
 
-    def train_split_data(self, df, train_val_ratio=0.8):
+    def train_split_data(self, df, split_ratio_val=0.2):
         data = {}
         calib_data = df[df.index < self.test_date]
 
         # split based on time btw test & val
-        test_T = int(train_val_ratio * len(calib_data))
+        test_T = int((1-split_ratio_val) * len(calib_data))
         data[DataTypes.TRAIN] = calib_data.iloc[:test_T]
         data[DataTypes.VAL] = calib_data.iloc[test_T:]
 

@@ -241,12 +241,9 @@ class FuturesDataset(Dataset):
                 if model.name == 'informer':
                     pred = model(inp, emb)
                     if len(pred) > 1:
-                        # returns also the attention
-                        attn = pred[1]
-                        pred = pred[0]
+                        pred = pred[0]  # 1 would be attention
                 elif model.name == 'transformer':
-                    pred = model(inp, emb)
-                    attn = model.get_attention(inp)[0, :, :, :]
+                    pred = model(inp)
                 else:
                     pred = model(inp)
 
@@ -254,8 +251,6 @@ class FuturesDataset(Dataset):
 
                 if scaler != "none":
                     raise ValueError("Scaler option not implemented yet!")
-
-            print(loss_type)
 
             if loss_type == LossTypes.SHARPE or loss_type == LossTypes.AVG_RETURNS:
                 # positions
@@ -279,31 +274,28 @@ class FuturesDataset(Dataset):
         ax1.legend()
         plt.show()
 
-        # Attention
-        if 'attn' in locals():
-            atten_i = attn[0][0][0].detach().cpu().numpy()
-            fig, ax = plt.subplots(figsize=(10, 10))
-            sns.heatmap(atten_i, ax=ax, cmap="Spectral")
-            return atten_i
-        else:
-            return None
-
-    def get_attention(self, model, id):
-        if model.name in ['informer', 'transformer']:
-            inp = self[id]['inp'].unsqueeze(
-                0).to(device)
-
-            if model.name == 'transformer':
-                attn = model.get_attention(inp)
-            elif model.name == 'informer':
-                emb = self[id]['time_embd'].unsqueeze(0).to(device)
-                _, attn = model(inp, emb)
-            else:
-                raise ValueError("Model not supported")
-
-            return attn
-        else:
+    def get_attention(self, model, batch=None, id=None):
+        if model.name not in ['transformer']:
             raise ValueError("Model not supported")
+
+        if batch is not None:
+            inputs = batch['inp'].double().to(device)
+        elif id is not None:
+            inputs = self[id]['inp'].unsqueeze(0).to(device)
+        else:
+            raise ValueError(
+                "Either input the entire bacht or just a single id.")
+
+        if model.name == 'transformer':
+            attn = model.get_attention(inputs)  # B x n_layer x L x L
+            # currently just outputs multi-head
+            attn = attn.unsqueeze(2)
+
+        # elif model.name == 'informer':
+        #    emb = self[id]['time_embd'].unsqueeze(0).to(device)
+        #       _, attn = model(inp, emb)
+
+        return attn.detach().cpu().numpy()
 
 # --- --- ---
 

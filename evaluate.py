@@ -237,6 +237,10 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
                 inputs_time_embd = batch['time_embd'].double().to(device)
                 x_static = batch['inst_id'].to(device)
                 prediction = model(inputs, inputs_time_embd, x_static)
+            elif model.name == 'transformer':
+                x_time = batch['time_embd'].double().to(device)
+                x_static = batch['inst_id'].to(device)
+                prediction = model(inputs, x_time, x_static)
             else:
                 prediction = model(inputs)
 
@@ -285,22 +289,26 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
 
     with torch.no_grad():
         for i, batch in enumerate(data_iter):
-            input = batch['inp'].double().to(device)
+            inputs = batch['inp'].double().to(device)
             time_id = batch['time'].cpu().numpy()
             inst = batch['inst']
 
             if model.name == 'informer':
                 time_embd = batch['time_embd'].double().to(device)
-                prediction = model(input, time_embd)
+                prediction = model(inputs, time_embd)
                 if len(prediction) > 1:
                     # returns also the attention
                     prediction = prediction[0]
             elif model.name == 'conv_momentum':
                 inputs_time_embd = batch['time_embd'].double().to(device)
                 x_static = batch['inst_id'].to(device)
-                prediction = model(input, inputs_time_embd, x_static)
+                prediction = model(inputs, inputs_time_embd, x_static)
+            elif model.name == 'transformer':
+                x_time = batch['time_embd'].double().to(device)
+                x_static = batch['inst_id'].to(device)
+                prediction = model(inputs, x_time, x_static)
             else:
-                prediction = model(input)
+                prediction = model(inputs)
 
             # dim of prediction: B/T x T/B x 1
             if not model.batch_first:

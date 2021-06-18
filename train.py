@@ -66,8 +66,8 @@ hyper_grid = {
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
         'attn': ['prob'],
-        # 'embed_type': ['fixed', 'timeF'],
-        'embed_type': ['simple'],
+        # 'informer_embed_type': ['fixed', 'timeF'],
+        'informer_embed_type': ['simple'],
         'n_layer': [1, 2],
         'n_head': [2, 4, 8],
         'd_model': [8, 16, 32, 64],
@@ -84,6 +84,11 @@ hyper_grid = {
         'n_layer': [1, 2, 3],
         'd_hidden_factor': [1, 2, 4],
         'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
+        # embedding ----
+        'embedding_add': ['projection', 'simple'],
+        'embedding_pos': ['simple', 'learn'],
+        'embedding_tmp': [0, 1],
+        'embedding_id': [0, 1]
     },
     'conv_transformer': {
         'batch_size': [64, 128],
@@ -110,8 +115,8 @@ hyper_grid = {
         'n_head': [1, 2, 4],
         'd_hidden_factor': [1, 2, 4],
         # ----
-        'use_embed': [0],
-        'embed_type': ['timeF', 'momentum']
+        'informer_embed_type': ['timeF', 'momentum'],
+        'attn': ['full']
     }
 }
 
@@ -196,13 +201,21 @@ def get_args():
                         default='prob', help="Informer: choose attention mechanism")
     parser.add_argument('--factor', type=int, nargs='?',
                         default=5, help="Informer: sampling factor for prob attn")
-    # .. informer / conv_momentum
-    parser.add_argument('--embed_type', type=str, nargs='?', choices=['fixed', 'timeF', 'simple', 'momentum'],
+    parser.add_argument('--informer_embed_type', type=str, nargs='?', choices=['fixed', 'timeF', 'simple', 'momentum'],
                         default='fixed', help="Informer: choose embedding layer")
-    parser.add_argument('--use_embed', type=int, nargs='?', choices=[0, 1],
-                        default=1, help="Conv Momentum: choose embedding, yes (1) no (0)?")
+    # .. embedding
+    parser.add_argument('--embedding_add', type=str, nargs='?', choices=['projection', 'simple'],
+                        default='projection', help="tbd")
+    parser.add_argument('--embedding_pos', type=str, nargs='?', choices=['simple', 'learn'],
+                        default='simple', help="tbd")
+    parser.add_argument('--embedding_tmp', type=int, nargs='?', choices=[0, 1],
+                        default=1, help="tbd")
+    parser.add_argument('--embedding_id', type=int, nargs='?', choices=[0, 1],
+                        default=1, help="tbd")
 
     args = parser.parse_args()
+    args.embedding_tmp = bool(args.embedding_tmp)
+    args.embedding_id = bool(args.embedding_id)
     return args
 
 
@@ -400,17 +413,13 @@ def run_training_window(args):
         if args.d_hidden_factor > 0:
             args.d_hidden = args.d_hidden_factor * args.d_model
 
-        len_input_window = args.win_len
-        len_output_window = len_input_window
+        n_categories = len(dataset_train.inst_lookup.keys())
 
-        # check args
-        if args.d_model % args.n_head != 0:
-            # the dimensionality of multihead attention needs to be divisible by dim of encoder input
-            raise ValueError(
-                "Need to change arg n_head: arg d_model needs to be divisible by arg n_head")
-
-        model = TransformerEncoder(d_model=args.d_model, d_input=d_input, d_output=d_output, n_head=args.n_head, n_layer=args.n_layer, d_hidden=args.d_hidden,
-                                   dropout=args.dropout, len_input_window=len_input_window, len_output_window=len_output_window, loss_type=train_manager['loss_type'], device=device)
+        model = TransformerEncoder(
+            d_model=args.d_model, d_input=d_input, d_output=d_output, n_head=args.n_head,
+            n_layer=args.n_layer, d_hidden=args.d_hidden, dropout=args.dropout, win_len=args.win_len,
+            embedding_add=args.embedding_add, embedding_pos=args.embedding_pos, embedding_tmp=args.embedding_tmp,
+            embedding_entity=args.embedding_id, n_categories=n_categories, loss_type=train_manager['loss_type'])
     elif args.arch == 'conv_transformer':
         if args.d_hidden_factor > 0:
             args.d_hidden = args.d_hidden_factor * args.d_model
@@ -453,7 +462,7 @@ def run_training_window(args):
         factor = args.factor  # factor to sample for prob attention
         d_ff = args.d_model
         attn = args.attn  # 'full' or 'prob'
-        embed_type = args.embed_type  # could be changed to learnable
+        embed_type = args.informer_embed_type  # could be changed to learnable
         # if n_layer > 1: each succ layer will be reduced by 2
         do_distil = False
         output_attention = True
@@ -485,9 +494,9 @@ def run_training_window(args):
             raise ValueError()
     elif args.arch == 'conv_momentum':
         # for static
-        use_embed = args.use_embed
+        use_embed = 1
         n_categories = len(dataset_train.inst_lookup.keys())
-        embed_type = args.embed_type
+        embed_type = args.informer_embed_type
 
         dropout = 0.
         dropoutw = args.dropout
@@ -521,13 +530,17 @@ def run_training_window(args):
     if model.name in ['transformer', 'conv_transformer', 'informer', 'conv_momentum']:
         train_manager['setting'] = train_manager['setting'] + \
             '_dm-{}_nh-{}'.format(args.d_model, args.n_head)
+        # plus embedding
+        train_manager['setting'] = train_manager['setting'] + \
+            '_embAdd-{}_embPos-{}_embT-{}_embID-{}'.format(
+                args.embedding_add, args.embedding_pos, args.embedding_tmp, args.embedding_id)
     if model.name == 'conv_transformer':
         train_manager['setting'] = train_manager['setting'] + \
             '_ql-{}'.format(args_conv_transf['q_len'])
-    if model.name == 'informer':
+    if model.name in ['informer', 'conv_momentum']:
         train_manager['setting'] = train_manager['setting'] + \
-            '_attn-{}_embed-{}_factor-{}'.format(
-                args.attn, args.embed_type, args.factor)
+            '_attn-{}_informerEmbed-{}_factor-{}'.format(
+                args.attn, args.informer_embed_type, args.factor)
     if args.do_log:
         logx.msg(f"Setting: {train_manager['setting']}")
     else:
@@ -669,6 +682,10 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             inputs_time_embd = batch['time_embd'].double().to(device)
             x_static = batch['inst_id'].to(device)
             prediction = model(inputs, inputs_time_embd, x_static)
+        elif model.name == 'transformer':
+            x_time = batch['time_embd'].double().to(device)
+            x_static = batch['inst_id'].to(device)
+            prediction = model(inputs, x_time, x_static)
         else:
             prediction = model(inputs)
 
