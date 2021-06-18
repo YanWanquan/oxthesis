@@ -28,7 +28,7 @@ import evaluate
 from libs.data_loader import BaseDataLoader, DataTypes
 from libs.futures_dataset import FuturesDataset
 # models
-from libs.models.transformer import TransformerEncoder
+from libs.models.transformer import TransformerEncoder, Transformer
 from libs.models.conv_transformer import ConvTransformerEncoder
 from libs.models.lstm_dropout import LSTM
 from libs.losses import LossTypes, LossHelper
@@ -39,6 +39,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 train_archs = {
     'transformer': TransformerEncoder,
+    'transformer_full': Transformer,
     'lstm': LSTM,
     'conv_transformer': ConvTransformerEncoder,
     'informer': InformerEncoder,
@@ -75,20 +76,20 @@ hyper_grid = {
         'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
     },
     'transformer': {
-        'batch_size': [64, 128, 254],
-        'lr': [0.01, 0.001, 0.0001],
-        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        'batch_size': [64, 128],
+        'lr': [0.001],
+        'max_grad_norm': [0.1, 0.01, 0.001],
         # ---
         'd_model': [8, 16, 32, 64],
-        'n_head': [1, 2, 4, 8],
+        'n_head': [2, 4],
         'n_layer': [1, 2, 3],
         'd_hidden_factor': [1, 2, 4],
-        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
         # embedding ----
-        'embedding_add': ['projection', 'simple'],
+        'embedding_add': ['projection', 'separate'],
         'embedding_pos': ['simple', 'learn'],
-        'embedding_tmp': [0, 1],
-        'embedding_id': [0, 1]
+        'embedding_tmp': [0],
+        'embedding_id': [1]
     },
     'conv_transformer': {
         'batch_size': [64, 128],
@@ -204,12 +205,12 @@ def get_args():
     parser.add_argument('--informer_embed_type', type=str, nargs='?', choices=['fixed', 'timeF', 'simple', 'momentum'],
                         default='fixed', help="Informer: choose embedding layer")
     # .. embedding
-    parser.add_argument('--embedding_add', type=str, nargs='?', choices=['projection', 'simple'],
+    parser.add_argument('--embedding_add', type=str, nargs='?', choices=['projection', 'separate'],
                         default='projection', help="tbd")
     parser.add_argument('--embedding_pos', type=str, nargs='?', choices=['simple', 'learn'],
                         default='simple', help="tbd")
     parser.add_argument('--embedding_tmp', type=int, nargs='?', choices=[0, 1],
-                        default=1, help="tbd")
+                        default=0, help="tbd")
     parser.add_argument('--embedding_id', type=int, nargs='?', choices=[0, 1],
                         default=1, help="tbd")
 
@@ -401,7 +402,9 @@ def run_training_window(args):
         'frequency': args.frequency,
         'year_test': pd.to_datetime(args.test_date).year,
         # scaler
-        'scaler_path': scaler_path
+        'scaler_path': scaler_path,
+        # deocoder
+        'decoder': False
     }
 
     # (3) build model ----
@@ -418,6 +421,21 @@ def run_training_window(args):
         model = TransformerEncoder(
             d_model=args.d_model, d_input=d_input, d_output=d_output, n_head=args.n_head,
             n_layer=args.n_layer, d_hidden=args.d_hidden, dropout=args.dropout, win_len=args.win_len,
+            embedding_add=args.embedding_add, embedding_pos=args.embedding_pos, embedding_tmp=args.embedding_tmp,
+            embedding_entity=args.embedding_id, n_categories=n_categories, loss_type=train_manager['loss_type'])
+    elif args.arch == 'transformer_full':
+        if args.d_hidden_factor > 0:
+            args.d_hidden = args.d_hidden_factor * args.d_model
+
+        n_categories = len(dataset_train.inst_lookup.keys())
+
+        # decoder
+        dec_win_len = 7
+        train_manager['decoder'] = True
+
+        model = Transformer(
+            d_model=args.d_model, d_input=d_input, d_output=d_output, n_head=args.n_head,
+            n_layer=args.n_layer, d_hidden=args.d_hidden, dropout=args.dropout, dec_win_len=dec_win_len,
             embedding_add=args.embedding_add, embedding_pos=args.embedding_pos, embedding_tmp=args.embedding_tmp,
             embedding_entity=args.embedding_id, n_categories=n_categories, loss_type=train_manager['loss_type'])
     elif args.arch == 'conv_transformer':
@@ -527,7 +545,7 @@ def run_training_window(args):
     # label the experiment
     train_manager['setting'] = 'a-{}_l-{}_ty-{}_bs-{}_lr-{}_pa-{}_gn-{}_wl-{}_ws-{}_nl-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
         args.test_date).year, args.batch_size, args.lr, args.patience, args.max_grad_norm, args.win_len, args.step, args.n_layer, args.d_hidden, args.dropout)
-    if model.name in ['transformer', 'conv_transformer', 'informer', 'conv_momentum']:
+    if model.name in ['transformer', 'transformer_full', 'conv_transformer', 'informer', 'conv_momentum']:
         train_manager['setting'] = train_manager['setting'] + \
             '_dm-{}_nh-{}'.format(args.d_model, args.n_head)
         # plus embedding
@@ -663,10 +681,6 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
     # stack_labels_numpy = []
 
     for i, batch in enumerate(train_iter):
-        inputs = batch['inp'].double().to(device)
-        labels = batch['trg'].double().to(device)
-        returns = batch['rts'].double().to(device)
-
         # tmp: Zihao
         # stack_input_numpy.append(inputs.cpu().numpy())
         # stack_labels_numpy.append(labels.cpu().numpy())
@@ -674,26 +688,14 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
 
         optimizer.zero_grad()
 
-        # time embedding?
-        if model.name == 'informer':
-            inputs_time_embd = batch['time_embd'].double().to(device)
-            prediction, attns = model(inputs, inputs_time_embd)
-        elif model.name == 'conv_momentum':
-            inputs_time_embd = batch['time_embd'].double().to(device)
-            x_static = batch['inst_id'].to(device)
-            prediction = model(inputs, inputs_time_embd, x_static)
-        elif model.name == 'transformer':
-            x_time = batch['time_embd'].double().to(device)
-            x_static = batch['inst_id'].to(device)
-            prediction = model(inputs, x_time, x_static)
-        else:
-            prediction = model(inputs)
+        predictions, labels, returns = process_one_batch(
+            model, batch, train_manager)
 
         if LossHelper.use_returns_for_loss(train_manager['loss_type']):
-            loss = loss_fn(prediction, returns,
+            loss = loss_fn(predictions, returns,
                            freq=train_manager['frequency'])
         else:
-            loss = loss_fn(prediction, labels)
+            loss = loss_fn(predictions, labels)
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(
@@ -725,6 +727,49 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
 
     mean_loss_epoch = np.average(loss_epoch[:, 0], weights=loss_epoch[:, 1])
     return mean_loss_epoch
+
+
+def process_one_batch(model, batch, train_manager=None):
+    inputs = batch['inp'].double().to(device)
+    labels = batch['trg'].double().to(device)
+    returns = batch['rts'].double().to(device)
+
+    if model.name == 'informer':
+        inputs_time_embd = batch['time_embd'].double().to(device)
+        prediction, attns = model(inputs, inputs_time_embd)
+    elif model.name == 'conv_momentum':
+        inputs_time_embd = batch['time_embd'].double().to(device)
+        x_static = batch['inst_id'].to(device)
+        prediction = model(inputs, inputs_time_embd, x_static)
+    elif model.name == 'transformer':
+        x_time = batch['time_embd'].double().to(device)
+        x_static = batch['inst_id'].to(device)
+        prediction = model(inputs, x_time, x_static)
+    elif model.name == 'transformer_full':
+        B, L, D = inputs.shape
+        time = batch['time_embd'].double().to(device)
+        entity = batch['inst_id'].to(device)
+        enc = inputs[:, :-7, :]
+        enc_time = time[:, :-7, :]
+        enc_entity = entity
+
+        dec_pad = torch.ones([B, 1, D]).double().to(device)
+        dec_inp = inputs[:, -7:, :]
+        dec = torch.cat((dec_pad, dec_inp), dim=1)
+        dec_time = time[:, -7:, :]
+        dec_entity = entity
+
+        prediction = model(enc, dec, enc_time,
+                           enc_entity, dec_time, dec_entity)
+
+        # if decoder
+        prediction = prediction.unsqueeze(-2)
+        labels = labels[:, -1, :]
+        returns = returns[:, -1, :]
+    else:
+        prediction = model(inputs)
+
+    return prediction, labels, returns
 
 
 def evaluate_iter(model, data_iter, train_manager, do_strategy=False, base_df=None, do_log=False):

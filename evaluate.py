@@ -23,6 +23,7 @@ from libs.data_loader import BaseDataLoader, DataTypes
 from libs.futures_dataset import FuturesDataset
 # models
 from libs.models.tsmom import BasicMomentumStrategy, LongOnlyStrategy
+from train import process_one_batch, train
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -222,33 +223,14 @@ def evaluate_model(model, data_iter, train_manager, do_log=None):
 
     with torch.no_grad():
         for i, batch in enumerate(data_iter):
-            inputs = batch['inp'].double().to(device)
-            labels = batch['trg'].double().to(device)
-            returns = batch['rts'].double().to(device)
-
-            if model.name == 'informer':
-                time_embd = batch['time_embd'].double().to(device)
-                prediction = model(inputs, time_embd)
-
-                if len(prediction) > 1:
-                    # returns also the attention
-                    prediction = prediction[0]
-            elif model.name == 'conv_momentum':
-                inputs_time_embd = batch['time_embd'].double().to(device)
-                x_static = batch['inst_id'].to(device)
-                prediction = model(inputs, inputs_time_embd, x_static)
-            elif model.name == 'transformer':
-                x_time = batch['time_embd'].double().to(device)
-                x_static = batch['inst_id'].to(device)
-                prediction = model(inputs, x_time, x_static)
-            else:
-                prediction = model(inputs)
+            predictions, labels, returns = process_one_batch(
+                model, batch, train_manager)
 
             if LossHelper.use_returns_for_loss(train_manager['loss_type']):
-                loss = loss_fn(prediction, returns,
+                loss = loss_fn(predictions, returns,
                                freq=train_manager['frequency'])
             else:
-                loss = loss_fn(prediction, labels)
+                loss = loss_fn(predictions, labels)
 
             batch_size = batch['inp'].shape[0]
             total_loss[i] = np.array([loss, batch_size])
@@ -289,40 +271,24 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
 
     with torch.no_grad():
         for i, batch in enumerate(data_iter):
-            inputs = batch['inp'].double().to(device)
-            time_id = batch['time'].cpu().numpy()
             inst = batch['inst']
-
-            if model.name == 'informer':
-                time_embd = batch['time_embd'].double().to(device)
-                prediction = model(inputs, time_embd)
-                if len(prediction) > 1:
-                    # returns also the attention
-                    prediction = prediction[0]
-            elif model.name == 'conv_momentum':
-                inputs_time_embd = batch['time_embd'].double().to(device)
-                x_static = batch['inst_id'].to(device)
-                prediction = model(inputs, inputs_time_embd, x_static)
-            elif model.name == 'transformer':
-                x_time = batch['time_embd'].double().to(device)
-                x_static = batch['inst_id'].to(device)
-                prediction = model(inputs, x_time, x_static)
-            else:
-                prediction = model(inputs)
+            time_id = batch['time'].cpu().numpy()
+            predictions, labels, returns = process_one_batch(
+                model, batch)
 
             # dim of prediction: B/T x T/B x 1
             if not model.batch_first:
-                prediction = prediction.permute(
+                predictions = predictions.permute(
                     1, 0, 2).squeeze(-1).cpu().numpy()  # T x B x 1 -> B x T
             else:
                 # B x T x 1 -> B x T
-                prediction = prediction.squeeze(-1).cpu().numpy()
+                predictions = predictions.squeeze(-1).cpu().numpy()
 
             # insert predictions to empty df
-            for sample_i in range(prediction.shape[0]):
+            for sample_i in range(predictions.shape[0]):
                 time_id_i = time_id[sample_i]
                 time_i = predictions_df.index[time_id_i]
-                prediction_i = prediction[sample_i, :]
+                prediction_i = predictions[sample_i, :]
                 slicer = (time_i, inst[sample_i])
 
                 if not predictions_df.loc[slicer].isnull().all():
