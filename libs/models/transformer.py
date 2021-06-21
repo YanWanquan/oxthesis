@@ -71,6 +71,8 @@ class TransformerEncoder(nn.Module):
             self.temporal_embedding = TimeFeatureEmbedding(
                 self.d_embd, freq=freq)
 
+        self.drop_embedding = nn.Dropout(self.dropout)
+
         if self.embedding_pos == 'simple':
             self.pos_embedding = SimplePositionalEncoding(
                 self.d_embd, add_x=False)
@@ -94,11 +96,23 @@ class TransformerEncoder(nn.Module):
 
         self.init_weights()
 
-    def forward(self, x, x_time=None, x_entity=None, src_mask=None):
-        B, L, D = x.shape
-        x = x.permute(1, 0, 2)  # TransformerEncoder expects dim: L x B x C
+    def forward(self, enc, enc_time=None, enc_entity=None, src_mask=None):
+        enc = enc.permute(1, 0, 2)  # TransformerEncoder expects dim: L x B x C
 
         # embedding ----
+        embedding = self.embedding(enc, enc_time, enc_entity)
+
+        if src_mask is None:
+            src_mask = self.src_mask
+
+        # encoding ----
+        memory = self.encode(embedding, src_mask)
+
+        return self.decode(memory).permute(1, 0, 2)
+
+    def embedding(self, enc, enc_time=None, enc_entity=None):
+        L, B, D = enc.shape
+
         # ... positional
         if self.embedding_pos == 'simple':
             embedding = self.pos_embedding(torch.zeros(L)).expand(-1, B, -1)
@@ -110,28 +124,24 @@ class TransformerEncoder(nn.Module):
         # ... temporal
         if self.embedding_tmp:
             temporal_encoding = self.temporal_embedding(
-                x_time).permute(1, 0, 2)
+                enc_time).permute(1, 0, 2)
             embedding = embedding + temporal_encoding
 
         # ... entity
         if self.embedding_entity:
-            entity_encoding = self.entity_embedding(x_entity).unsqueeze(0)
+            entity_encoding = self.entity_embedding(enc_entity).unsqueeze(0)
             embedding = embedding + entity_encoding
+
+        embedding = self.drop_embedding(embedding)
 
         # ... embedding add type
         if self.embedding_add == 'projection':
-            proj = self.projection(x)
+            proj = self.projection(enc)
             embedding = proj + embedding
         elif self.embedding_add == 'separate':
-            embedding = torch.cat((x, embedding), dim=-1)
+            embedding = torch.cat((enc, embedding), dim=-1)
 
-        if src_mask is None:
-            src_mask = self.src_mask
-
-        # encoding ----
-        memory = self.encode(embedding, src_mask)
-
-        return self.decode(memory).permute(1, 0, 2)
+        return embedding
 
     def encode(self, embedding, src_mask):
         return self.encoder(embedding, mask=src_mask)
@@ -153,16 +163,17 @@ class TransformerEncoder(nn.Module):
             '-inf')).masked_fill(mask == 1, float(0.0))
         return mask
 
-    def get_attention(self, src, src_mask=None):
+    def get_attention(self, enc, enc_time, enc_entity, src_mask):
         # currently self_attn just returns the output of multi-head attn..
         # ... and not the heads separately
         # TBD
-        src = src.permute(1, 0, 2)
+        enc = enc.permute(1, 0, 2)  # TransformerEncoder expects dim: L x B x C
+
+        # embedding ----
+        emb = self.embedding(enc, enc_time, enc_entity)
 
         if src_mask is None:
             src_mask = self.src_mask
-
-        emb = self.pos_encoder(self.embedding(src))
 
         attention_layers = []
         for layer in self.encoder.layers:

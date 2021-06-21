@@ -25,87 +25,147 @@ from libs.losses import LossHelper
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def gelu(x):
-    return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
-
-
-def swish(x):
-    return x * torch.sigmoid(x)
-
-
-ACT_FNS = {
-    'relu': nn.ReLU(),
-    'swish': swish,
-    'gelu': gelu
-}
-
-
 class ConvTransformerEncoder(nn.Module):
     """
-    The architecture is based on the paper "...".
+    The architecture is based on the paper Li et al. (2019).
     """
 
     name = 'conv_transformer'
     batch_first = True
 
-    """ Transformer model """
-
-    def __init__(self, args, d_input, n_head, n_layer, d_model, win_len, d_output, loss_type, seq_num=None):
+    def __init__(self, args, d_input, n_head, n_layer,
+                 d_model, d_hidden, dropout, win_len, d_output, loss_type,
+                 embedding_add='projection', embedding_pos='simple',
+                 embedding_tmp=None, embedding_entity=None,  n_categories=None):
         super(ConvTransformerEncoder, self).__init__()
-        # SVEN
-        # d_model is n_embd here
-        # TMP: deactivated sequence embedding
+
+        if n_layer > 1 and isinstance(args['q_len'], int):
+            args['q_len'] = [args['q_len'] for _ in range(n_layer)]
+
         self.d_input = d_input
+        self.d_output = d_output
         self.n_head = n_head
-        #self.seq_num = seq_num
-        self.n_embd = d_model
+        self.d_hidden = d_hidden
+        self.d_model = d_model
         self.n_layer = n_layer
         self.win_len = win_len
-        self.d_output = d_output
-        #self.id_embed = nn.Embedding(seq_num,n_embd)
-        self.po_embed = nn.Embedding(self.win_len, self.n_embd)
-        self.drop_em = nn.Dropout(args['embd_pdrop'])
-        block = Block(args, n_head, win_len, self.n_embd+self.d_input,
-                      scale=args['scale_att'], q_len=args['q_len'])
-        self.blocks = nn.ModuleList([copy.deepcopy(block)
-                                    for _ in range(self.n_layer)])
+        self.loss_type = loss_type
+        self.dropout = dropout
 
-        # SVEN
-        self.decoder = nn.Linear(self.d_input + self.n_embd, self.d_output)
+        self.embedding_pos = embedding_pos
+        self.embedding_add = embedding_add
+        self.embedding_entity = embedding_entity
+        self.n_categories = n_categories
+        self.embedding_tmp = embedding_tmp
+        self.d_embd = 20
+
+        # embedding ----
+        if self.embedding_add == 'projection':
+            self.d_embd = self.d_model
+            self.projection = nn.Linear(d_input, d_model)
+        elif self.embedding_add == 'separate':
+            self.d_model = self.d_input + self.d_embd
+        else:
+            raise ValueError(
+                f"Wrong embedding_add parameter: {self.embedding_add}")
+
+        if self.embedding_entity:
+            print("> use entity embedding")
+            self.entity_embedding = nn.Embedding(
+                self.n_categories, self.d_embd)
+
+        if self.embedding_tmp:
+            print("> use temporal embedding")
+            # tmp: feature or embedding?
+            freq = 'd'
+            self.temporal_embedding = TimeFeatureEmbedding(
+                self.d_embd, freq=freq)
+
+        self.drop_embedding = nn.Dropout(self.dropout)
+
+        if self.embedding_pos == 'simple':
+            self.pos_embedding = SimplePositionalEncoding(
+                self.d_embd, add_x=False)
+        elif self.embedding_pos == 'learn':
+            self.pos_embedding = nn.Embedding(
+                self.win_len, self.d_embd)
+        else:
+            raise ValueError(
+                f"Wrong embedding_pos parameter: {self.embedding_pos}")
+
+        # block ----
+        self.blocks = nn.ModuleList([
+            Block(args, self.n_head, self.win_len, self.d_model,
+                  self.d_hidden, self.dropout,
+                  scale=args['scale_att'], q_len=args['q_len'][l])
+            for l in range(self.n_layer)])
+
+        # output ---
+        self.projection_out = nn.Linear(
+            self.d_model, self.d_output)
         self.output_fn = LossHelper.get_output_activation(loss_type)
 
         self.init_weights()
 
-    def forward(self, x, series_id=None):
-        #id_embedding = self.id_embed(series_id)
-        length = x.size(1)  # (Batch_size,length,input_dim)
-        position = torch.arange(length).type(torch.long).to(device)
-        po_embedding = self.po_embed(position)
-        batch_size = x.size(0)
-        embedding_sum = torch.zeros(batch_size, length, self.n_embd).to(device)
-        embedding_sum[:] = po_embedding
-        embedding_sum = embedding_sum  # + id_embedding.unsqueeze(1)
-        x = torch.cat((x, embedding_sum), dim=2)
+    def forward(self, enc, enc_time=None, enc_entity=None):
+        # embedding ----
+        x = self.embedding(enc, enc_time, enc_entity)
+
+        # attention block ----
+        attn_weights = []
         for block in self.blocks:
-            x = block(x)
+            x, attn_weight = block(x)
+            attn_weights.append(attn_weight)
 
-        # SVEN
-        pred = self.decoder(x)
-        return self.output_fn(pred)
+        # .. format attention weights for easier handling
+        attn_weights = torch.stack(attn_weights, dim=1)
 
-    # SVEN
+        # out ----
+        out = self.projection_out(x)
+        return self.output_fn(out), attn_weights
+
+    def embedding(self, enc, enc_time, enc_entity):
+        B, L, D = enc.shape
+
+        # ... positional
+        if self.embedding_pos == 'simple':
+            embedding = self.pos_embedding(torch.zeros(L)).expand(-1, B, -1)
+            embedding = embedding.transpose(1, 0)  # batch first
+        elif self.embedding_pos == 'learn':
+            pos = torch.arange(L).to(device)
+            embedding = self.pos_embedding(
+                pos).unsqueeze(-2).expand(-1, B, -1)
+            embedding = embedding.transpose(1, 0)  # batch first
+
+        # ... temporal
+        if self.embedding_tmp:
+            temporal_encoding = self.temporal_embedding(
+                enc_time)
+            embedding = embedding + temporal_encoding
+
+        # ... entity
+        if self.embedding_entity:
+            entity_encoding = self.entity_embedding(enc_entity).unsqueeze(1)
+            embedding = embedding + entity_encoding
+
+        embedding = self.drop_embedding(embedding)
+
+        # ... embedding add type
+        if self.embedding_add == 'projection':
+            proj = self.projection(enc)
+            embedding = proj + embedding
+        elif self.embedding_add == 'separate':
+            embedding = torch.cat((enc, embedding), dim=-1)
+
+        return embedding
+
     def init_weights(self):
-        #nn.init.normal_(self.id_embed.weight, std=0.02)
-        nn.init.normal_(self.po_embed.weight, std=0.02)
-
-        for m in self.modules():
-            if isinstance(m, nn.Conv1d):
-                nn.init.normal_(m.weight, 0, 0.01)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.constant_(m.bias, 0)
+        for name, p in self.named_parameters():
+            if "bias" in name:
+                nn.init.zeros_(p)
+            elif p.dim() > 1:
+                # nn.init.normal_(p, 0, 0.01)
+                nn.init.xavier_uniform_(p)
 
 
 class Attention(nn.Module):
@@ -113,8 +173,9 @@ class Attention(nn.Module):
     def __init__(self, args, n_head, n_embd, win_len, scale, q_len):
         super(Attention, self).__init__()
 
+        print(f"> use convolutional kernel {q_len}")
         if(args['sparse']):
-            print('Activate log sparse!')
+            print(f'> activate log sparse for layer')
             mask = self.log_mask(win_len, args['sub_len'])
         else:
             mask = torch.tril(torch.ones(win_len, win_len)
@@ -173,10 +234,11 @@ class Attention(nn.Module):
         mask = self.mask_tri[:, :, :pre_att.size(-2), :pre_att.size(-1)]
         pre_att = pre_att * mask + -1e9 * (1 - mask)
         pre_att = nn.Softmax(dim=-1)(pre_att)
+        att_weights = pre_att
         pre_att = self.attn_dropout(pre_att)
         attn = torch.matmul(pre_att, value)
 
-        return attn
+        return (attn, att_weights)
 
     def merge_heads(self, x):
         x = x.permute(0, 2, 1, 3).contiguous()
@@ -199,11 +261,11 @@ class Attention(nn.Module):
         query = self.split_heads(query)
         key = self.split_heads(key, k=True)
         value = self.split_heads(value)
-        attn = self.attn(query, key, value)
+        attn, attn_weights = self.attn(query, key, value)
         attn = self.merge_heads(attn)
         attn = self.c_proj(attn)
         attn = self.resid_dropout(attn)
-        return attn
+        return attn, attn_weights
 
 
 class Conv1D(nn.Module):
@@ -229,49 +291,29 @@ class Conv1D(nn.Module):
         return x
 
 
-class LayerNorm(nn.Module):
-    "Construct a layernorm module in the OpenAI style (epsilon inside the square root)."
-
-    def __init__(self, n_embd, e=1e-5):
-        super(LayerNorm, self).__init__()
-        self.g = nn.Parameter(torch.ones(n_embd))
-        self.b = nn.Parameter(torch.zeros(n_embd))
-        self.e = e
-
-    def forward(self, x):
-        mu = x.mean(-1, keepdim=True)
-        sigma = (x - mu).pow(2).mean(-1, keepdim=True)
-        x = (x - mu) / torch.sqrt(sigma + self.e)
-        return self.g * x + self.b
-
-
-class MLP(nn.Module):
-    def __init__(self, n_state, n_embd, acf='relu'):
-        super(MLP, self).__init__()
-        n_embd = n_embd
-        self.c_fc = Conv1D(n_state, 1, n_embd)
-        self.c_proj = Conv1D(n_embd, 1, n_state)
-        self.act = ACT_FNS[acf]
-        self.dropout = nn.Dropout(0.1)
-
-    def forward(self, x):
-        hidden1 = self.act(self.c_fc(x))
-        hidden2 = self.c_proj(hidden1)
-        return self.dropout(hidden2)
-
-
 class Block(nn.Module):
-    def __init__(self, args, n_head, win_len, n_embd, scale, q_len):
+    def __init__(self, args, n_head, win_len, d_model, d_hidden, dropout, scale, q_len):
         super(Block, self).__init__()
-        n_embd = n_embd
-        self.attn = Attention(args, n_head, n_embd, win_len, scale, q_len)
-        self.ln_1 = LayerNorm(n_embd)
-        self.mlp = MLP(4 * n_embd, n_embd)
-        self.ln_2 = LayerNorm(n_embd)
+        self.d_model = d_model
+        self.dropout = dropout
+        self.attn = Attention(args, n_head, d_model, win_len, scale, q_len)
+
+        self.linear1 = nn.Linear(d_model, d_hidden)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(d_hidden, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x):
-        attn = self.attn(x)
-        ln1 = self.ln_1(x + attn)
-        mlp = self.mlp(ln1)
-        hidden = self.ln_2(ln1 + mlp)
-        return hidden
+        attn, attn_weight = self.attn(x)
+        x = x + self.dropout1(attn)
+        x = self.norm1(x)
+
+        x2 = self.linear2(self.dropout(nn.functional.relu(self.linear1(x))))
+        x = x + self.dropout2(x2)
+        x = self.norm2(x)
+        return x, attn_weight

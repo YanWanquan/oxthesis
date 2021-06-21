@@ -275,21 +275,30 @@ class FuturesDataset(Dataset):
         plt.show()
 
     def get_attention(self, model, batch=None, id=None):
-        if model.name not in ['transformer']:
+        if model.name not in ['transformer', 'conv_transformer']:
             raise ValueError("Model not supported")
 
         if batch is not None:
             inputs = batch['inp'].double().to(device)
+            x_time = batch['time_embd'].double().to(device)
+            x_static = batch['inst_id'].to(device)
         elif id is not None:
             inputs = self[id]['inp'].unsqueeze(0).to(device)
+            x_time = self[id]['time_embd'].unsqueeze(0).to(device)
+            x_static = torch.tensor(
+                self[id]['inst_id']).unsqueeze(0).to(device)
         else:
             raise ValueError(
                 "Either input the entire bacht or just a single id.")
 
         if model.name == 'transformer':
-            attn = model.get_attention(inputs)  # B x n_layer x L x L
+            attn = model.get_attention(
+                inputs, x_time, x_static)  # B x n_layer x L x L
             # currently just outputs multi-head
-            attn = attn.unsqueeze(2)
+            attn = attn.unsqueeze(2)  # -> B x n_layer x H x L x L
+        elif model.name == 'conv_transformer':
+            # B x n_layer x H x L x L
+            _, attn = model(inputs, x_time, x_static)
 
         # elif model.name == 'informer':
         #    emb = self[id]['time_embd'].unsqueeze(0).to(device)
