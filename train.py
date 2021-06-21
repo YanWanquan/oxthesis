@@ -92,17 +92,26 @@ hyper_grid = {
         'embedding_id': [1]
     },
     'conv_transformer': {
+        # conv ----
+        'conv_len': [1, 3, 6],
+        'conv_distil': [0, 1],
+        'attn_sparse': [0, 1],
+        'attn_sparse_sub_len': [5, 10, 20, 30],
+        # ---
         'batch_size': [64, 128],
-        'lr': [0.01, 0.001, 0.0001],
-        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        'lr': [0.001],
+        'max_grad_norm': [0.1, 0.01, 0.001],
         # ---
         'd_model': [8, 16, 32, 64],
-        'n_head': [1, 2, 4, 8],
-        'n_layer': [1, 2, 3],
+        'n_head': [2, 4, 8],
+        'n_layer': [2, 3, 4],  # set higher than in canonical
         'd_hidden_factor': [1, 2, 4],
-        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
-        # ---
-        'conv_len': [1, 3, 6, 9]
+        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+        # embedding ----
+        'embedding_add': ['projection'],
+        'embedding_pos': ['simple'],
+        'embedding_tmp': [0],
+        'embedding_id': [1]
     },
     'conv_momentum': {
         'batch_size': [64, 128, 254],
@@ -199,6 +208,12 @@ def get_args():
     # .. convolutional transformer
     parser.add_argument('--conv_len', type=int, nargs='?',
                         default=1, help="ConvTransformer: kernel size for query-key pair")
+    parser.add_argument('--conv_distil', type=int, nargs='?',
+                        default=1, help="ConvTransformer: tbd")
+    parser.add_argument('--attn_sparse', type=int, nargs='?',
+                        default=1, help="ConvTransformer: set attention to be sparse?")
+    parser.add_argument('--attn_sparse_sub_len', type=int, nargs='?',
+                        default=20, help="ConvTransformer: tbd")
     # .. informer
     parser.add_argument('--attn', type=str, nargs='?', choices=['prob', 'full'],
                         default='prob', help="Informer: choose attention mechanism")
@@ -217,6 +232,8 @@ def get_args():
                         default=1, help="tbd")
 
     args = parser.parse_args()
+    args.conv_distil = bool(args.conv_distil)
+    args.attn_sparse = bool(args.attn_sparse)
     args.embedding_tmp = bool(args.embedding_tmp)
     args.embedding_id = bool(args.embedding_id)
     return args
@@ -419,12 +436,11 @@ def run_training_window(args):
     print(f"(3) Build model: {args.arch}")
     d_input = len(dataset_train.INP_COLS)
     d_output = 1
+    n_categories = len(dataset_train.inst_lookup.keys())
 
     if args.arch == 'transformer':
         if args.d_hidden_factor > 0:
             args.d_hidden = args.d_hidden_factor * args.d_model
-
-        n_categories = len(dataset_train.inst_lookup.keys())
 
         model = TransformerEncoder(
             d_model=args.d_model, d_input=d_input, d_output=d_output, n_head=args.n_head,
@@ -434,8 +450,6 @@ def run_training_window(args):
     elif args.arch == 'transformer_full':
         if args.d_hidden_factor > 0:
             args.d_hidden = args.d_hidden_factor * args.d_model
-
-        n_categories = len(dataset_train.inst_lookup.keys())
 
         # decoder
         dec_win_len = 7
@@ -450,26 +464,34 @@ def run_training_window(args):
         if args.d_hidden_factor > 0:
             args.d_hidden = args.d_hidden_factor * args.d_model
 
-        do_sparse = False
-        do_scale_att = False
+        if args.conv_len == 1 or not args.conv_distil:
+            args.conv_len = [args.conv_len for _ in range(args.n_layer)]
+        else:
+            args.conv_len = np.linspace(
+                start=1, stop=args.conv_len, num=args.n_layer, dtype=int).tolist()
+
+        if not args.attn_sparse:
+            args.sub_len = 1
 
         # args needed: sparse (bool), embd_drop (float), attn_pdrop (float), resid_pdrop (float), scale_att (bool), q_len (int), sub_len (int)
         args_conv_transf = {
+            'scale_att': True,
             # convolution
             'q_len': args.conv_len,  # kernel size for generating key-query
             # sparse attention
-            'sparse': do_sparse,
-            'sub_len': 1,  # sub_len of sparse attention
+            'sparse': args.attn_sparse,
+            'sub_len': args.attn_sparse_sub_len,  # sub_len of sparse attention
             # dropout
-            'embd_pdrop': args.dropout,
-            'attn_pdrop': args.dropout,
-            'resid_pdrop': args.dropout,
-            # others
-            'scale_att': do_scale_att,
+            'attn_pdrop': 0,  # dropout is already applied after attention operation
+            'resid_pdrop': 0  # dropout is already applied after attention operation
         }
 
-        model = ConvTransformerEncoder(args=args_conv_transf, d_input=d_input, n_head=args.n_head, n_layer=args.n_layer,
-                                       d_model=args.d_model, win_len=args.win_len, d_output=d_output, loss_type=train_manager['loss_type'])
+        model = ConvTransformerEncoder(
+            args=args_conv_transf,
+            d_model=args.d_model, d_input=d_input, d_output=d_output, n_head=args.n_head,
+            n_layer=args.n_layer, d_hidden=args.d_hidden, dropout=args.dropout, win_len=args.win_len,
+            embedding_add=args.embedding_add, embedding_pos=args.embedding_pos, embedding_tmp=args.embedding_tmp,
+            embedding_entity=args.embedding_id, n_categories=n_categories, loss_type=train_manager['loss_type'])
     elif args.arch == 'lstm':
         dropout = 0.
         dropoutw = args.dropout
@@ -561,8 +583,11 @@ def run_training_window(args):
             '_embAdd-{}_embPos-{}_embT-{}_embID-{}'.format(
                 args.embedding_add, args.embedding_pos, args.embedding_tmp, args.embedding_id)
     if model.name == 'conv_transformer':
+        str_q_len = ''.join([str(q)
+                            for _, q in enumerate(args_conv_transf['q_len'])])
         train_manager['setting'] = train_manager['setting'] + \
-            '_ql-{}'.format(args_conv_transf['q_len'])
+            '_cl-{}_cd-{}_sparse-{}_subLen-{}'.format(
+                str_q_len, args.conv_distil, args.attn_sparse, args.attn_sparse_sub_len)
     if model.name in ['informer', 'conv_momentum']:
         train_manager['setting'] = train_manager['setting'] + \
             '_attn-{}_informerEmbed-{}_factor-{}'.format(
@@ -783,12 +808,16 @@ def process_one_batch(model, batch, train_manager=None):
         x_time = batch['time_embd'].double().to(device)
         x_static = batch['inst_id'].to(device)
         prediction = model(inputs, x_time, x_static)
+    elif model.name == 'conv_transformer':
+        x_time = batch['time_embd'].double().to(device)
+        x_static = batch['inst_id'].to(device)
+        prediction, _ = model(inputs, x_time, x_static)
     elif model.name == 'transformer_full':
         B, L, D = inputs.shape
         time = batch['time_embd'].double().to(device)
         entity = batch['inst_id'].to(device)
-        enc = inputs[:, :-7, :]
-        enc_time = time[:, :-7, :]
+        enc = inputs[:, : -7, :]
+        enc_time = time[:, : -7, :]
         enc_entity = entity
 
         dec_pad = torch.ones([B, 1, D]).double().to(device)
