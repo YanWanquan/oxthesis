@@ -144,7 +144,7 @@ class TransformerEncoder(nn.Module):
             if "bias" in name:
                 nn.init.zeros_(p)
             elif p.dim() > 1:
-                #nn.init.normal_(p, 0, 0.01)
+                # nn.init.normal_(p, 0, 0.01)
                 nn.init.xavier_uniform_(p)
 
     def generate_causal_mask(self, size):

@@ -66,10 +66,10 @@ hyper_grid = {
         'lr': [0.01, 0.001],
         'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
         # ---
-        'attn': ['prob'],
+        'attn': ['full'],
         # 'informer_embed_type': ['fixed', 'timeF'],
         'informer_embed_type': ['simple'],
-        'n_layer': [1, 2],
+        'n_layer': [1],
         'n_head': [2, 4, 8],
         'd_model': [8, 16, 32, 64],
         'd_hidden_factor': [1, 2, 4],
@@ -169,12 +169,14 @@ def get_args():
     parser.add_argument('--step', type=int, nargs='?',
                         default=63, help="If step is not equal win_len the windows will overlap")
     # training ----
+    parser.add_argument('--optimizer', type=str, nargs='?',
+                        default='adamw', choices=['adam', 'adamw', 'bertAdam'], help="tbd")
     parser.add_argument('--epochs', type=int, nargs='?',
                         default=10, help="Number of maximal epochs")
     parser.add_argument('--patience', type=int, nargs='?',
                         default=25, help="Early stopping rule")
     parser.add_argument('--lr', type=float, nargs='?',
-                        default=0.01, help="Learning rate")
+                        default=0.001, help="Learning rate")
     parser.add_argument('--batch_size', type=int, nargs='?',
                         default=128, help="Batch size for training")
     parser.add_argument('--max_grad_norm', type=float, nargs='?',
@@ -235,9 +237,11 @@ def main():
             args.test_date) + pd.offsets.DateOffset(years=args.test_win)
         args.do_log = False  # runx works just for one model per experiment
 
+        best_train_loss = {}
         best_val_loss = {}
         best_test_loss = {}
         best_settings = {}
+        log_train_loss = {}
         log_val_loss = {}
         log_test_loss = {}
         checkpoints = {}
@@ -264,11 +268,12 @@ def main():
                     args_dict_i = utils.DotDict(args_dict_i)
 
                     # run window ----
-                    val_loss_i, test_loss_i, setting_i, checkpoint_i = run_training_window(
+                    train_loss_i, val_loss_i, test_loss_i, setting_i, checkpoint_i = run_training_window(
                         args_dict_i)
 
                     # logs
                     checkpoints[args.test_date].append(checkpoint_i)
+                    log_train_loss[setting_i] = train_loss_i
                     log_val_loss[setting_i] = val_loss_i
                     log_test_loss[setting_i] = test_loss_i
 
@@ -302,6 +307,8 @@ def main():
         # log settings
         if args.random_search_len:
             df_log = pd.concat([
+                pd.Series(log_train_loss.values(),
+                          log_train_loss.keys(), name="train_loss"),
                 pd.Series(log_val_loss.values(),
                           log_val_loss.keys(), name="val_loss"),
                 pd.Series(log_test_loss.values(),
@@ -335,7 +342,8 @@ def main():
         print("> Start single window training")
         args.do_log = True
 
-        val_loss, test_loss, setting, checkpoint = run_training_window(args)
+        train_loss, val_loss, test_loss, setting, checkpoint = run_training_window(
+            args)
     else:
         raise ValueError("Either test_win_len or test_date needs to be set!")
 
@@ -581,17 +589,22 @@ def run_training_window(args):
     _, model, train_manager = utils.load_model(path=best_checkpoint_path)
 
     if train_manager['args']['stopping_type'] == 'strategy':
+        train_loss = evaluate_iter(model=model, data_iter=train_dataloader,
+                                   train_manager=train_manager, do_log=False, do_strategy=True, base_df=base_loader.df[DataTypes.TRAIN])
         test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
                                   train_manager=train_manager, do_log=False, do_strategy=True, base_df=base_loader.df[DataTypes.TEST])
     else:
+        train_loss = evaluate_iter(model=model, data_iter=train_dataloader,
+                                   train_manager=train_manager, do_log=False, do_strategy=False)
         test_loss = evaluate_iter(model=model, data_iter=test_dataloader,
                                   train_manager=train_manager, do_log=False, do_strategy=False)
 
+    print(f">> Train loss: {train_loss:.6f}")
     print(f">> Val loss: {val_loss:.6f}")
     print(f">> Test loss: {test_loss:.6f}")
 
     print("(6) Finished training")
-    return (val_loss, test_loss, train_manager['setting'], best_checkpoint_path)
+    return (train_loss, val_loss, test_loss, train_manager['setting'], best_checkpoint_path)
 
 
 def train(model, train_iter, val_iter, train_manager, do_log=False, val_df=None):
@@ -599,8 +612,29 @@ def train(model, train_iter, val_iter, train_manager, do_log=False, val_df=None)
     best_val_score = np.inf
 
     # train manager ----
-    train_manager['optimizer'] = torch.optim.Adam(
-        model.parameters(), lr=train_manager['lr'])
+    if train_manager['args']['optimizer'] == 'adam':
+        print("> optimizer: Adam")
+        train_manager['optimizer'] = torch.optim.Adam(
+            model.parameters(), lr=train_manager['lr'])
+    elif train_manager['args']['optimizer'] == 'adamw':
+        print("> optimizer: AdamW")
+        train_manager['optimizer'] = torch.optim.AdamW(
+            model.parameters(), lr=train_manager['lr'], weight_decay=0.001)
+    elif train_manager['args']['optimizer'] == 'bertAdam':
+        print("> optimzer: BERTAdam")
+        # This is equal to default Adam.
+        warmup_proportion = 0.1
+        weight_decay = 0.05
+        num_train_steps = int(
+            len(train_iter) * train_manager['args']['epochs'])
+        train_manager['optimizer'] = utils.BERTAdam(model.parameters(),
+                                                    lr=train_manager['args']['lr'],
+                                                    warmup=warmup_proportion,
+                                                    t_total=num_train_steps,
+                                                    weight_decay_rate=weight_decay
+                                                    )
+    else:
+        raise ValueError("The optimizer is currently not supported.")
 
     stopping_path = train_manager['args']['logdir'] + "/" + "opt_" + \
         train_manager['setting'] + '.p'
@@ -662,6 +696,10 @@ def train(model, train_iter, val_iter, train_manager, do_log=False, val_df=None)
         if early_stopping.early_stop:
             print(f"> Early stopping")
             break
+
+        # if train_manager['args']['optimizer'] == 'adam':
+        #    utils.adjust_learning_rate(
+         #       train_manager['optimizer'], epoch_i+1, train_manager['args']['lr'])
 
     best_val_loss = -early_stopping.best_score
     return (early_stopping.path, best_val_loss)
