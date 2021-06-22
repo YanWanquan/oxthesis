@@ -69,8 +69,7 @@ class ConvMomentum(nn.Module):
             self.d_embd = self.d_hidden_lstm_in
             self.projection = nn.Linear(d_input, self.d_hidden_lstm_in)
             self.d_input_lstm = self.d_hidden_lstm_in
-        elif self.emebdding_add == 'separate':
-            # one unnecessary layer?
+        elif self.embedding_add == 'separate':
             self.d_input_lstm = self.d_input
 
         else:
@@ -90,11 +89,13 @@ class ConvMomentum(nn.Module):
         self.grn_init_cell_lstm = GatedResidualNetwork(
             self.d_embd, self.d_hidden_lstm_in, self.d_hidden_lstm_in, dropout=self.dropout)
 
-        self.gate_post_lstm = GateAddNorm(self.d_hidden_lstm_out)
+        self.gate_post_lstm = GateAddNorm(
+            self.d_hidden_lstm_out, self.d_input_lstm)
         self.grn_post_lstm = GatedResidualNetwork(
             self.d_hidden_lstm_out, self.d_hidden_lstm_out, self.d_hidden_lstm_out, dropout=0)
 
-        self.gate_post_attn = GateAddNorm(self.d_hidden_lstm_out)
+        self.gate_post_attn = GateAddNorm(
+            self.d_hidden_lstm_out, self.d_hidden_lstm_out)
         self.grn_post_attn = GatedResidualNetwork(
             self.d_hidden_lstm_out, self.d_hidden_lstm_out, self.d_hidden_lstm_out, dropout=0)
 
@@ -136,9 +137,9 @@ class ConvMomentum(nn.Module):
 
         # LSTM ----
         init_hidden_lstm = self.grn_init_hidden_lstm(
-            embd_static).permute(1, 0, 2).expand(self.n_layer_lstm, -1, -1)
+            embd_static).expand(self.n_layer_lstm, -1, -1)  # n_layer x B x d_embed
         init_cell_lstm = self.grn_init_cell_lstm(
-            embd_static).permute(1, 0, 2).expand(self.n_layer_lstm, -1, -1)
+            embd_static).expand(self.n_layer_lstm, -1, -1)  # same
 
         out_lstm = self.encoder_lstm(
             embd_var, hidden=(init_hidden_lstm, init_cell_lstm))
@@ -260,7 +261,7 @@ class ConvMomentum(nn.Module):
 
 
 class GatedLinearUnit(nn.Module):
-    def __init__(self, d_inp, d_hidden=None, dropout=0.1):
+    def __init__(self, d_inp, d_hidden=None, dropout=0.):
         super().__init__()
 
         self.d_inp = d_inp
@@ -287,22 +288,29 @@ class GatedLinearUnit(nn.Module):
 
 
 class GateAddNorm(nn.Module):
-    def __init__(self, d_inp, dropout=0.1):
+    def __init__(self, d_inp, d_skip, dropout=0.):
         super().__init__()
         self.d_inp = d_inp
         self.dropout = dropout
+        self.d_skip = d_skip
+
+        if self.d_skip != self.d_inp:
+            self.dense_skip = nn.Linear(self.d_skip, self.d_inp)
 
         self.glu = GatedLinearUnit(self.d_inp, dropout=self.dropout)
         self.norm = nn.LayerNorm(self.d_inp)
 
     def forward(self, x, skip):
+        if self.d_skip != self.d_inp:
+            skip = self.dense_skip(skip)
+
         x = self.glu(x)
         out = self.norm(x + skip)
         return out
 
 
 class GatedResidualNetwork(nn.Module):
-    def __init__(self, d_inp, d_hidden, d_output=None, dropout=0.1):
+    def __init__(self, d_inp, d_hidden, d_output=None, dropout=0.):
         super().__init__()
         # tmp: no context vector
         self.d_inp = d_inp
@@ -315,7 +323,7 @@ class GatedResidualNetwork(nn.Module):
         self.dense2 = nn.Linear(self.d_hidden, self.d_hidden)
         self.glu = GatedLinearUnit(self.d_hidden, self.d_output, self.dropout)
 
-        self.norm = nn.LayerNorm(self.d_inp)
+        self.norm = nn.LayerNorm(self.d_output)
         self.dropout = nn.Dropout(self.dropout)
 
         self.init_weights()

@@ -160,7 +160,7 @@ def evaluate(model, data_iter, base_df, train_manager):
     df_skeleton = base_df.swaplevel(axis=1)['prs']
     predictions = calc_predictions_df(model, data_iter, df_shape=df_skeleton.shape,
                                       df_index=df_skeleton.index, df_insts=df_skeleton.columns,
-                                      win_step=train_manager['args']['win_len'], scaler=train_manager['scaler'], loss_type=train_manager['loss_type'])
+                                      win_step=train_manager['args']['step'], scaler=train_manager['scaler'], loss_type=train_manager['loss_type'])
     positions = calc_position_df(predictions, train_manager['loss_type'])
 
     scaled_rts = base_df.xs('rts_scaled', axis=1,
@@ -289,13 +289,18 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
                 prediction_i = predictions[sample_i, :]
                 slicer = (time_i, inst[sample_i])
 
-                if not predictions_df.loc[slicer].isnull().all():
-                    tim_id_sub_i = time_id_i[-win_step:]
-                    time_i_sub = predictions_df.index[tim_id_sub_i]
-                    prediction_i = prediction_i[-win_step:]
-                    slicer = (time_i_sub, inst[sample_i])
+                # this condition makes no sense if the batch is randomly shuffled
+                # tmp: either replace w smth better or adopt the lines above
+                # if not predictions_df.loc[slicer].isnull().all():
+
+                tim_id_sub_i = time_id_i[-win_step:]
+                time_i_sub = predictions_df.index[tim_id_sub_i]
+                prediction_i = prediction_i[-win_step:]
+                slicer = (time_i_sub, inst[sample_i])
 
                 count_df.loc[slicer] += 1
+                if count_df.loc[slicer].max() > 1:
+                    print("Hey")
                 predictions_df.loc[slicer] = prediction_i
 
     # inverse scale trend predictions
@@ -304,7 +309,7 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
             df=predictions_df, scaler_dict=scaler)
 
     # for verification
-    # count_df.to_csv("count_tmp.csv")
+    count_df.to_csv("count_tmp.csv")
 
     return predictions_df
 

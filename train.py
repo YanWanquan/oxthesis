@@ -747,10 +747,15 @@ def run_epoch(model, train_iter, train_manager, epoch_i=None, do_log=False):
             model, batch, train_manager)
 
         if LossHelper.use_returns_for_loss(train_manager['loss_type']):
-            loss = loss_fn(predictions, returns,
-                           freq=train_manager['frequency'])
+            loss = loss_fn(
+                predictions[:, -train_manager['args']['step']:, :],
+                returns[:, -train_manager['args']['step']:, :],
+                freq=train_manager['frequency'])
         else:
-            loss = loss_fn(predictions, labels)
+            loss = loss_fn(
+                predictions[:, -train_manager['args']['step']:, :],
+                labels[:, -train_manager['args']['step']:, :]
+            )
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(
@@ -839,7 +844,7 @@ def evaluate_iter(model, data_iter, train_manager, do_strategy=False, base_df=No
 
         predictions = evaluate.calc_predictions_df(model, data_iter, df_shape=df_skeleton.shape,
                                                    df_index=df_skeleton.index, df_insts=df_skeleton.columns,
-                                                   win_step=train_manager['args']['win_len'], scaler=train_manager['args']['scaler'], loss_type=train_manager['loss_type'])
+                                                   win_step=train_manager['args']['step'], scaler=train_manager['args']['scaler'], loss_type=train_manager['loss_type'])
         positions = evaluate.calc_position_df(
             predictions, train_manager['loss_type'])
         str_returns = utils.calc_strategy_returns(

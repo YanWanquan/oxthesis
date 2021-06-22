@@ -152,6 +152,14 @@ class BaseDataLoader:
             covariates_dict[f"MACD_{short_win}"] = macd.calc_signal_scale(
                 prices=covariates_dict['prs'], short_win=short_win, long_win=long_win)
 
+        # Others
+        # tmp: why not working --> throws just NAs when concat..
+        # covariates_dict['age'] = covariates_dict['prs'].apply(
+        #    lambda x: range(1, x.shape[0]))
+        # covariates_dict['age'] = (covariates_dict['age'] - covariates_dict['age'].min()) / (
+        #    covariates_dict['age'].max() - covariates_dict['age'].min())
+        #covariates_dict['age'] = covariates_dict['age'] * (1-(-1)) - 1
+
         # target returns: label as last column
         covariates_dict['rts_lead'] = covariates_dict['rts'].shift(
             -lead_target)
