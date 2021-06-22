@@ -53,11 +53,11 @@ train_archs = {
 
 hyper_grid = {
     'lstm': {
-        'batch_size': [64, 128, 254],
-        'lr': [1, 0.1, 0.01, 0.001, 0.0001],
-        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        'batch_size': [64, 128, 256],
+        'lr': [0.01, 0.001],
+        'max_grad_norm': [0.01, 1, 100],
         # ----
-        'dropout': [0.1, 0.2, 0.3, 0.4, 0.5],
+        'dropout': [0, 0.1, 0.2, 0.3, 0.4, 0.5],
         'd_hidden': [5, 10, 20, 40, 80],
         'n_layer': [1]
     },
@@ -100,7 +100,7 @@ hyper_grid = {
         # ---
         'batch_size': [64, 128],
         'lr': [0.001],
-        'max_grad_norm': [0.1, 0.01, 0.001],
+        'max_grad_norm': [0.1],
         # ---
         'd_model': [8, 16, 32, 64],
         'n_head': [2, 4, 8],
@@ -114,19 +114,18 @@ hyper_grid = {
         'embedding_id': [1]
     },
     'conv_momentum': {
-        'batch_size': [64, 128, 254],
-        'lr': [0.01, 0.001, 0.0001],
-        'max_grad_norm': [1, 0.1, 0.01, 0.001, 0.0001],
+        'batch_size': [64, 128],
+        'lr': [0.01, 0.001],
+        'max_grad_norm': [0.01, 1, 100],
         # ----
-        'dropout': [0.1, 0.2, 0.3, 0.4],
-        'd_hidden': [4, 12, 20, 40, 80],
+        'dropout': [0, 0.1, 0.2, 0.3, 0.4, 0.5],
+        'd_hidden': [8, 16, 32, 64],
         'n_layer': [1],
         # ----
-        'n_head': [1, 2, 4],
-        'd_hidden_factor': [1, 2, 4],
-        # ----
-        'informer_embed_type': ['timeF', 'momentum'],
-        'attn': ['full']
+        'n_head': [1, 4, 8],
+        # embedding ----
+        'embedding_add': ['projection'],
+        'embedding_id': [1]
     }
 }
 
@@ -495,8 +494,8 @@ def run_training_window(args):
     elif args.arch == 'lstm':
         dropout = 0.
         dropoutw = args.dropout
-        dropouti = args.dropout
-        dropouto = args.dropout
+        dropouti = 0
+        dropouto = 0
         args.d_hidden = [args.d_hidden for l in range(args.n_layer)]
         model = LSTM(d_input=d_input, d_output=d_output,
                      d_hidden=args.d_hidden, n_layer=args.n_layer, dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
@@ -541,29 +540,21 @@ def run_training_window(args):
         else:
             raise ValueError()
     elif args.arch == 'conv_momentum':
-        # for static
-        use_embed = 1
-        n_categories = len(dataset_train.inst_lookup.keys())
-        embed_type = args.informer_embed_type
 
+        # lstm
         dropout = 0.
         dropoutw = args.dropout
-        dropouti = args.dropout
-        dropouto = args.dropout
+        dropouti = 0
+        dropouto = 0
         args.d_hidden = [args.d_hidden for l in range(args.n_layer)]
 
-        d_model = args.d_hidden[-1]
+        # attn
         len_input_window = args.win_len
-
-        if args.d_hidden_factor > 0:
-            args.d_attn_hidden = args.d_hidden_factor * args.d_model
-        else:
-            args.d_attn_hidden = args.d_model
 
         model = ConvMomentum(
             d_input=d_input, d_output=d_output, d_hidden=args.d_hidden, n_layer_lstm=args.n_layer,
-            len_input_window=len_input_window, n_head=args.n_head, d_model=d_model, d_attn_hidden=args.d_attn_hidden, n_layer_attn=1,
-            n_categories=n_categories, use_embed=use_embed,
+            len_input_window=len_input_window, n_head=args.n_head, n_layer_attn=1,
+            n_categories=n_categories, embedding_add=args.embedding_add, embedding_entity=args.embedding_id,
             dropout=dropout, dropouti=dropouti, dropoutw=dropoutw, dropouto=dropouto, loss_type=train_manager['loss_type'])
         args.d_hidden = args.d_hidden[0]
     else:
@@ -575,23 +566,24 @@ def run_training_window(args):
     # label the experiment
     train_manager['setting'] = 'a-{}_l-{}_ty-{}_bs-{}_lr-{}_pa-{}_gn-{}_wl-{}_ws-{}_nl-{}_dh-{}_dr-{}'.format(args.arch, args.loss_type, pd.to_datetime(
         args.test_date).year, args.batch_size, args.lr, args.patience, args.max_grad_norm, args.win_len, args.step, args.n_layer, args.d_hidden, args.dropout)
+    # .. plus embedding
+    train_manager['setting'] = train_manager['setting'] + \
+        '_embAdd-{}_embPos-{}_embT-{}_embID-{}'.format(
+        args.embedding_add, args.embedding_pos, args.embedding_tmp, args.embedding_id)
     if model.name in ['transformer', 'transformer_full', 'conv_transformer', 'informer', 'conv_momentum']:
         train_manager['setting'] = train_manager['setting'] + \
             '_dm-{}_nh-{}'.format(args.d_model, args.n_head)
-        # plus embedding
-        train_manager['setting'] = train_manager['setting'] + \
-            '_embAdd-{}_embPos-{}_embT-{}_embID-{}'.format(
-                args.embedding_add, args.embedding_pos, args.embedding_tmp, args.embedding_id)
     if model.name == 'conv_transformer':
         str_q_len = ''.join([str(q)
                             for _, q in enumerate(args_conv_transf['q_len'])])
         train_manager['setting'] = train_manager['setting'] + \
             '_cl-{}_cd-{}_sparse-{}_subLen-{}'.format(
                 str_q_len, args.conv_distil, args.attn_sparse, args.attn_sparse_sub_len)
-    if model.name in ['informer', 'conv_momentum']:
+    if model.name == 'informer':
         train_manager['setting'] = train_manager['setting'] + \
             '_attn-{}_informerEmbed-{}_factor-{}'.format(
                 args.attn, args.informer_embed_type, args.factor)
+
     if args.do_log:
         logx.msg(f"Setting: {train_manager['setting']}")
     else:
@@ -801,9 +793,8 @@ def process_one_batch(model, batch, train_manager=None):
         inputs_time_embd = batch['time_embd'].double().to(device)
         prediction, attns = model(inputs, inputs_time_embd)
     elif model.name == 'conv_momentum':
-        inputs_time_embd = batch['time_embd'].double().to(device)
         x_static = batch['inst_id'].to(device)
-        prediction = model(inputs, inputs_time_embd, x_static)
+        prediction = model(inputs, x_static)
     elif model.name == 'transformer':
         x_time = batch['time_embd'].double().to(device)
         x_static = batch['inst_id'].to(device)

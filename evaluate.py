@@ -3,7 +3,6 @@
 # Sven Giegerich / 13.05.2021
 # --- --- ---
 
-
 import argparse
 import enum
 import os
@@ -23,7 +22,6 @@ from libs.data_loader import BaseDataLoader, DataTypes
 from libs.futures_dataset import FuturesDataset
 # models
 from libs.models.tsmom import BasicMomentumStrategy, LongOnlyStrategy
-from train import process_one_batch, train
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -309,6 +307,52 @@ def calc_predictions_df(model, data_iter, df_shape, df_index, df_insts, win_step
     # count_df.to_csv("count_tmp.csv")
 
     return predictions_df
+
+
+def process_one_batch(model, batch, train_manager=None):
+    inputs = batch['inp'].double().to(device)
+    labels = batch['trg'].double().to(device)
+    returns = batch['rts'].double().to(device)
+
+    if model.name == 'informer':
+        inputs_time_embd = batch['time_embd'].double().to(device)
+        prediction, attns = model(inputs, inputs_time_embd)
+    elif model.name == 'conv_momentum':
+        x_static = batch['inst_id'].to(device)
+        prediction = model(inputs, x_static)
+    elif model.name == 'transformer':
+        x_time = batch['time_embd'].double().to(device)
+        x_static = batch['inst_id'].to(device)
+        prediction = model(inputs, x_time, x_static)
+    elif model.name == 'conv_transformer':
+        x_time = batch['time_embd'].double().to(device)
+        x_static = batch['inst_id'].to(device)
+        prediction, _ = model(inputs, x_time, x_static)
+    elif model.name == 'transformer_full':
+        B, L, D = inputs.shape
+        time = batch['time_embd'].double().to(device)
+        entity = batch['inst_id'].to(device)
+        enc = inputs[:, : -7, :]
+        enc_time = time[:, : -7, :]
+        enc_entity = entity
+
+        dec_pad = torch.ones([B, 1, D]).double().to(device)
+        dec_inp = inputs[:, -7:, :]
+        dec = torch.cat((dec_pad, dec_inp), dim=1)
+        dec_time = time[:, -7:, :]
+        dec_entity = entity
+
+        prediction = model(enc, dec, enc_time,
+                           enc_entity, dec_time, dec_entity)
+
+        # if decoder
+        prediction = prediction.unsqueeze(-2)
+        labels = labels[:, -1, :]
+        returns = returns[:, -1, :]
+    else:
+        prediction = model(inputs)
+
+    return prediction, labels, returns
 
 
 def evaluate_tsmom(model, data, time_test, do_save=True):
