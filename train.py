@@ -492,7 +492,7 @@ def run_training_window(args):
             embedding_add=args.embedding_add, embedding_pos=args.embedding_pos, embedding_tmp=args.embedding_tmp,
             embedding_entity=args.embedding_id, n_categories=n_categories, loss_type=train_manager['loss_type'])
     elif args.arch == 'lstm':
-        dropout = 0.
+        dropout = args.dropout
         dropoutw = args.dropout
         dropouti = 0
         dropouto = 0
@@ -542,7 +542,7 @@ def run_training_window(args):
     elif args.arch == 'conv_momentum':
 
         # lstm
-        dropout = 0.
+        dropout = args.dropout
         dropoutw = args.dropout
         dropouti = 0
         dropouto = 0

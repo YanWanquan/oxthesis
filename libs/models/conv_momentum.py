@@ -68,6 +68,11 @@ class ConvMomentum(nn.Module):
         if self.embedding_add == 'projection':
             self.d_embd = self.d_hidden_lstm_in
             self.projection = nn.Linear(d_input, self.d_hidden_lstm_in)
+            self.d_input_lstm = self.d_hidden_lstm_in
+        elif self.emebdding_add == 'separate':
+            # one unnecessary layer?
+            self.d_input_lstm = self.d_input
+
         else:
             raise ValueError(
                 f"Wrong embedding_add parameter: {self.embedding_add}")
@@ -80,6 +85,11 @@ class ConvMomentum(nn.Module):
         self.drop_embedding = nn.Dropout(self.dropout)
 
         # ... gated residual networks (GRNs) ----
+        self.grn_init_hidden_lstm = GatedResidualNetwork(
+            self.d_embd, self.d_hidden_lstm_in, self.d_hidden_lstm_in, dropout=self.dropout)
+        self.grn_init_cell_lstm = GatedResidualNetwork(
+            self.d_embd, self.d_hidden_lstm_in, self.d_hidden_lstm_in, dropout=self.dropout)
+
         self.gate_post_lstm = GateAddNorm(self.d_hidden_lstm_out)
         self.grn_post_lstm = GatedResidualNetwork(
             self.d_hidden_lstm_out, self.d_hidden_lstm_out, self.d_hidden_lstm_out, dropout=0)
@@ -90,7 +100,7 @@ class ConvMomentum(nn.Module):
 
         # ... LSTM ----
         self.lockdrop = LockedDropout()
-        self.lstms = [nn.LSTM(input_size=self.d_hidden_lstm_in if l == 0 else d_hidden[l - 1],
+        self.lstms = [nn.LSTM(input_size=self.d_input_lstm if l == 0 else d_hidden[l - 1],
                               hidden_size=d_hidden[l], num_layers=1, dropout=0,
                               batch_first=True) for l in range(n_layer_lstm)]
         if dropoutw > 0:
@@ -116,14 +126,25 @@ class ConvMomentum(nn.Module):
         # input x_time is not used
 
         # Embedding ----
-        embd = self.embedding(x_var.permute(1, 0, 2),
-                              x_static).permute(1, 0, 2)
+        embd_var, embd_static = self.embedding(x_var.permute(1, 0, 2),
+                                               x_static)
+        if embd_var is None:
+            embd_var = x_var
+        else:
+            embd_var = embd_var.permute(1, 0, 2)
+            embd_static = embd_static.permute(1, 0, 2)
 
         # LSTM ----
-        out_lstm = self.encoder_lstm(embd)
+        init_hidden_lstm = self.grn_init_hidden_lstm(
+            embd_static).permute(1, 0, 2).expand(self.n_layer_lstm, -1, -1)
+        init_cell_lstm = self.grn_init_cell_lstm(
+            embd_static).permute(1, 0, 2).expand(self.n_layer_lstm, -1, -1)
+
+        out_lstm = self.encoder_lstm(
+            embd_var, hidden=(init_hidden_lstm, init_cell_lstm))
 
         # GRN (I) ----
-        pre_attn = self.gate_post_lstm(out_lstm, embd)
+        pre_attn = self.gate_post_lstm(out_lstm, embd_var)
         pre_attn = self.grn_post_lstm(pre_attn)
 
         # Attn ----
@@ -160,11 +181,11 @@ class ConvMomentum(nn.Module):
         # ... embedding add type
         if self.embedding_add == 'projection':
             proj = self.projection(enc)
-            embedding = proj + embedding
+            return ((proj + embedding), embedding)
         elif self.embedding_add == 'separate':
-            embedding = torch.cat((enc, embedding), dim=-1)
-
-        return embedding
+            return None, embedding
+        else:
+            raise ValueError("Embedding add not supported!")
 
     def generate_causal_mask(self, size):
         mask = (torch.triu(torch.ones(size, size)) == 1).transpose(0, 1)
@@ -177,6 +198,8 @@ class ConvMomentum(nn.Module):
 
         if hidden is None:
             hidden = self.init_lstm_hidden(batch_size)
+        else:
+            hidden = [(hidden[0], hidden[1]) for _ in range(self.n_layer_lstm)]
 
         raw_output = emb  # input first layer
         new_hidden = []
